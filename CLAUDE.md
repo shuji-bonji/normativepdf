@@ -14,6 +14,7 @@
 | 看板・主張の線引き（書ける/書けない）・公開チャネル・競合監視 | [`docs/PUBLISHING.md`](docs/PUBLISHING.md) |
 | 言語選定（TypeScript・Accepted） | [`docs/adr/0001-language-choice.md`](docs/adr/0001-language-choice.md) |
 | 型の厳格性ポリシー（tsconfig フラグ・any 禁止・逃げ道の規律） | [`docs/adr/0002-type-strictness.md`](docs/adr/0002-type-strictness.md) |
+| フィルタ戦略（自前 inflate が正・native は暫定・CompressionStream は書きに使わない） | [`docs/adr/0003-filter-strategy.md`](docs/adr/0003-filter-strategy.md) |
 | 名前の経緯・ドメイン（normativepdf.dev） | [`NAMING.md`](NAMING.md) |
 | 未整理のアイデア置き場 | [`docs/IDEAS.md`](docs/IDEAS.md) |
 

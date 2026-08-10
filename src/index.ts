@@ -17,7 +17,8 @@ export type {
   CosString,
 } from './cos/types.js';
 export { COS_FALSE, COS_NULL, COS_TRUE, dictGet, dictGetRaw } from './cos/types.js';
-
+export type { XrefEntry, XrefFree, XrefInUse, XrefSection } from './file/file-parser.js';
+export { PdfDocument, parsePdf } from './file/file-parser.js';
 export {
   EOF,
   hexValue,
