@@ -11,7 +11,9 @@
 ## 何を作るのか
 
 **出力が veraPDF を通ることを、リリースごとに証明する TypeScript の PDF ツールチェーン。**
-その中核として、`pdf-lib` への委譲を解消する構造層の純 TypeScript 実装を作ります。
+目指すのは**汎用の純 TypeScript PDF ライブラリ**です。最初の一歩として、
+PDF family の `pdf-lib` への委譲を解消する構造層から作り始めます —
+family は最初の利用者であって、ターゲットではありません。
 
 「pdf-lib の後継」は名乗りません（その席は `@cantoo/pdf-lib` が埋めています）。
 空いているのは「作れる」ではなく **「測ってある」** です — 詳細は [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
