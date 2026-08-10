@@ -2,14 +2,19 @@
 
 > **条文駆動の PDF ライブラリ。** すべての挙動を ISO の条項に紐づけ、紐づけられないものは主張しない。
 >
-> ⚠️ **実装未着手。** 現在はアイデアプールの段階です。
-> 名前の選定経緯は [`NAMING.md`](NAMING.md)。
+> 🚧 **開発初期。** 設計は確定済み（2026-08-08・[`docs/DESIGN.md`](docs/DESIGN.md)）、
+> 実装は段階 0（COS オブジェクトモデル + パーサ）から。コードはまだ無い。
+> 名前の選定経緯は [`NAMING.md`](NAMING.md)、公開計画は [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
 ---
 
 ## 何を作るのか
 
-**`pdf-lib` を置き換える、構造層の純 TypeScript 実装。**
+**出力が veraPDF を通ることを、リリースごとに証明する TypeScript の PDF ツールチェーン。**
+その中核として、`pdf-lib` への委譲を解消する構造層の純 TypeScript 実装を作ります。
+
+「pdf-lib の後継」は名乗りません（その席は `@cantoo/pdf-lib` が埋めています）。
+空いているのは「作れる」ではなく **「測ってある」** です — 詳細は [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
 PDF family（`pdf-spec-mcp` / `pdf-reader-mcp` / `pdf-writer-mcp` / `pdf-verify-mcp`）は
 仕様原文・読み・書き・検証を分離して持っていますが、**書き手の実体は `pdf-lib` に委譲**しています。
@@ -81,7 +86,8 @@ pdf-verify-mcp veraPDF で機械採点
 
 ## 言語
 
-**TypeScript / Rust(WASM) は未決。** 検討は [`docs/adr/0001-language-choice.md`](docs/adr/0001-language-choice.md)。
+**TypeScript（確定・2026-08-08）。** 理由の中核は査読可能性。
+経緯は [`docs/adr/0001-language-choice.md`](docs/adr/0001-language-choice.md)（Accepted）。
 
 ## 想定される利用先
 
