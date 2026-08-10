@@ -14,3 +14,29 @@ declare class TextDecoder {
 declare class TextEncoder {
   encode(input?: string): Uint8Array;
 }
+
+/**
+ * WHATWG Compression Streams (Node.js >= 18, all evergreen browsers).
+ * Used by the INTERIM FlateDecode implementation only (ADR-0003: the
+ * canonical implementation will be a pure-TS inflate). Declared minimally —
+ * just the surface `src/filter/inflate.ts` touches.
+ */
+interface MinimalReadableStream {
+  pipeThrough(transform: DecompressionStream): MinimalReadableStream;
+}
+
+declare class DecompressionStream {
+  constructor(format: 'deflate' | 'deflate-raw' | 'gzip');
+  readonly readable: MinimalReadableStream;
+  readonly writable: unknown;
+}
+
+declare class Blob {
+  constructor(blobParts: readonly Uint8Array[]);
+  stream(): MinimalReadableStream;
+}
+
+declare class Response {
+  constructor(body: MinimalReadableStream);
+  arrayBuffer(): Promise<ArrayBuffer>;
+}

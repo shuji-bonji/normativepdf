@@ -9,9 +9,11 @@
  *   Size/Root available) because nothing works without them. Conformance
  *   checking beyond that is pdf-verify-mcp's job (DESIGN §4.2), not this
  *   parser's.
- * - Cross-reference *streams* (§7.5.8, PDF 1.5+) are not handled yet; a
- *   file whose startxref points at an indirect object raises a clear
- *   "not supported" error rather than a confusing syntax error.
+ * - Cross-reference streams (§7.5.8) and object streams (§7.5.7) are
+ *   handled; their decoding makes `parsePdf` and `getObject` async
+ *   (ADR-0003). Hybrid-reference files (XRefStm, §7.5.8.4) are not read
+ *   yet — the classic table wins, which §7.5.8.4 defines as acceptable
+ *   for readers that do not support the hybrid mechanism.
  *
  * Clause anchors used throughout:
  * - §7.5.2: the file begins with %PDF– and "byte offsets shall be
@@ -32,6 +34,8 @@ import { COS_NULL, dictGet } from '../cos/types.js';
 import { ByteCursor } from '../syntax/byte-cursor.js';
 import { ParseError, parseIndirectObject, parseObject } from '../syntax/object-parser.js';
 import { TokenReader } from '../syntax/token-reader.js';
+import { loadObjectStream, objectFromStream, type ParsedObjectStream } from './object-stream.js';
+import { parseXrefStreamSection } from './xref-stream.js';
 
 /** §7.5.4 — in-use entry: `nnnnnnnnnn ggggg n`. */
 export interface XrefInUse {
@@ -48,7 +52,26 @@ export interface XrefFree {
   readonly generation: number;
 }
 
-export type XrefEntry = XrefInUse | XrefFree;
+/** §7.5.8.3 Table 18 type 2 — compressed object; generation is implicitly 0. */
+export interface XrefCompressed {
+  readonly type: 'compressed';
+  /** Object number of the object stream holding this object. */
+  readonly streamObjectNumber: number;
+  /** Index of this object within the object stream (0..N-1). */
+  readonly indexInStream: number;
+}
+
+/**
+ * §7.5.8.3 — an entry type other than 0/1/2 "shall be interpreted as a
+ * reference to the null object" (forward compatibility). Recorded so a
+ * newer section's unknown entry correctly shadows an older definition.
+ */
+export interface XrefUnknown {
+  readonly type: 'unknown';
+  readonly rawType: number;
+}
+
+export type XrefEntry = XrefInUse | XrefFree | XrefCompressed | XrefUnknown;
 
 /** One cross-reference section (one `xref` keyword and its subsections + trailer). */
 export interface XrefSection {
@@ -78,6 +101,7 @@ export class PdfDocument {
 
   readonly #cache = new Map<string, CosObject>();
   readonly #inFlight = new Set<string>();
+  readonly #objStmCache = new Map<number, Promise<ParsedObjectStream>>();
 
   constructor(
     bytes: Uint8Array,
@@ -95,10 +119,11 @@ export class PdfDocument {
 
   /**
    * Fetch the indirect object `objectNumber generationNumber`.
-   * Undefined, free, or generation-mismatched objects read as the null
-   * object (R-7.3.10-13/14, R-7.3.10-6).
+   * Undefined, free, unknown-typed (§7.5.8.3), or generation-mismatched
+   * objects read as the null object (R-7.3.10-13/14, R-7.3.10-6).
+   * Async because compressed objects live in filtered object streams.
    */
-  getObject(objectNumber: number, generationNumber = 0): CosObject {
+  async getObject(objectNumber: number, generationNumber = 0): Promise<CosObject> {
     const key = `${objectNumber} ${generationNumber}`;
     const cached = this.#cache.get(key);
     if (cached !== undefined) {
@@ -106,10 +131,39 @@ export class PdfDocument {
     }
 
     const entry = this.xref.get(objectNumber);
-    if (entry === undefined || entry.type === 'free' || entry.generation !== generationNumber) {
+    if (entry === undefined || entry.type === 'free' || entry.type === 'unknown') {
       return COS_NULL;
     }
 
+    if (entry.type === 'in-use') {
+      if (entry.generation !== generationNumber) {
+        return COS_NULL;
+      }
+      return this.#parseInUse(key, objectNumber, generationNumber, entry);
+    }
+
+    // compressed: the generation number shall be implicitly 0 (§7.5.7)
+    if (generationNumber !== 0) {
+      return COS_NULL;
+    }
+    const objStm = await this.#objectStream(entry.streamObjectNumber);
+    const object = objectFromStream(
+      objStm,
+      entry.indexInStream,
+      objectNumber,
+      entry.streamObjectNumber,
+    );
+    this.#cache.set(key, object);
+    return object;
+  }
+
+  /** Parse an uncompressed in-use object at its recorded offset (synchronous). */
+  #parseInUse(
+    key: string,
+    objectNumber: number,
+    generationNumber: number,
+    entry: XrefInUse,
+  ): CosObject {
     if (this.#inFlight.has(key)) {
       throw new ParseError(
         `cyclic indirect-object dependency at object ${objectNumber} ${generationNumber}`,
@@ -122,10 +176,7 @@ export class PdfDocument {
       cur.seek(this.origin + entry.offset);
       const reader = new TokenReader(cur);
       const parsed = parseIndirectObject(reader, {
-        resolveStreamLength: (ref: CosRef): number | undefined => {
-          const resolved = this.getObject(ref.objectNumber, ref.generationNumber);
-          return resolved.kind === 'integer' ? resolved.value : undefined;
-        },
+        resolveStreamLength: (ref: CosRef): number | undefined => this.#resolveLengthSync(ref),
       });
       if (parsed.objectNumber !== objectNumber || parsed.generationNumber !== generationNumber) {
         throw new ParseError(
@@ -141,15 +192,82 @@ export class PdfDocument {
     }
   }
 
+  /**
+   * Synchronous /Length resolution for stream parsing. A Length object
+   * stored *inside an object stream* would need async decoding mid-parse;
+   * §7.5.7 forbids that placement only for object streams' own Length, so
+   * it is conceivable for ordinary streams — rejected explicitly until a
+   * real file demands it.
+   */
+  #resolveLengthSync(ref: CosRef): number | undefined {
+    const cached = this.#cache.get(`${ref.objectNumber} ${ref.generationNumber}`);
+    if (cached !== undefined) {
+      return cached.kind === 'integer' ? cached.value : undefined;
+    }
+    const entry = this.xref.get(ref.objectNumber);
+    if (entry === undefined || entry.type === 'free' || entry.type === 'unknown') {
+      return undefined;
+    }
+    if (entry.type === 'compressed') {
+      throw new ParseError(
+        `stream Length ${ref.objectNumber} ${ref.generationNumber} R is stored inside an object stream — not supported yet`,
+        this.origin,
+      );
+    }
+    if (entry.generation !== ref.generationNumber) {
+      return undefined;
+    }
+    const resolved = this.#parseInUse(
+      `${ref.objectNumber} ${ref.generationNumber}`,
+      ref.objectNumber,
+      ref.generationNumber,
+      entry,
+    );
+    return resolved.kind === 'integer' ? resolved.value : undefined;
+  }
+
+  /** Load and index an object stream once; concurrent requests share the promise. */
+  #objectStream(streamObjectNumber: number): Promise<ParsedObjectStream> {
+    const existing = this.#objStmCache.get(streamObjectNumber);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const loading = (async (): Promise<ParsedObjectStream> => {
+      const entry = this.xref.get(streamObjectNumber);
+      if (entry === undefined || entry.type !== 'in-use') {
+        throw new ParseError(
+          `object stream ${streamObjectNumber} shall be an ordinary in-use object (§7.5.7: stream objects shall not be stored in an object stream)`,
+          this.origin,
+        );
+      }
+      if (entry.generation !== 0) {
+        throw new ParseError(
+          `the generation number of an object stream shall be zero (§7.5.7), got ${entry.generation}`,
+          this.origin,
+        );
+      }
+      const obj = this.#parseInUse(`${streamObjectNumber} 0`, streamObjectNumber, 0, entry);
+      if (obj.kind !== 'stream') {
+        throw new ParseError(
+          `object ${streamObjectNumber} is referenced as an object stream but is a ${obj.kind}`,
+          this.origin,
+        );
+      }
+      return loadObjectStream(obj, streamObjectNumber);
+    })();
+    this.#objStmCache.set(streamObjectNumber, loading);
+    return loading;
+  }
+
   /** If `value` is a reference, resolve it (undefined → null per R-7.3.10-13); otherwise identity. */
-  resolve(value: CosObject): CosObject {
+  async resolve(value: CosObject): Promise<CosObject> {
     return value.kind === 'ref'
       ? this.getObject(value.objectNumber, value.generationNumber)
       : value;
   }
 
   /** The document catalog — trailer Root resolved (Table 15: required, indirect). */
-  get catalog(): CosObject {
+  async getCatalog(): Promise<CosObject> {
     const root = dictGet(this.trailer, 'Root');
     if (root === undefined) {
       throw new ParseError('trailer shall have a Root entry (§7.5.5 Table 15)', this.origin);
@@ -158,8 +276,8 @@ export class PdfDocument {
   }
 }
 
-/** Parse a complete PDF file (classic cross-reference tables). */
-export function parsePdf(bytes: Uint8Array): PdfDocument {
+/** Parse a complete PDF file (classic cross-reference tables and cross-reference streams). */
+export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
   const origin = indexOfSeq(bytes, HEADER, 0);
   if (origin < 0) {
     throw new ParseError('no %PDF- header found (§7.5.2)', 0);
@@ -167,7 +285,9 @@ export function parsePdf(bytes: Uint8Array): PdfDocument {
   const version = readHeaderVersion(bytes, origin);
   const startxref = readStartxref(bytes);
 
-  // Walk the Prev chain, newest section first (§7.5.4, §7.5.6).
+  // Walk the Prev chain, newest section first (§7.5.4, §7.5.6). Prev works
+  // identically for tables (Table 15) and streams (Table 17). Hybrid files'
+  // XRefStm (Table 19) is deliberately not followed yet.
   const sections: XrefSection[] = [];
   const visited = new Set<number>();
   let offset: number | undefined = startxref;
@@ -176,7 +296,7 @@ export function parsePdf(bytes: Uint8Array): PdfDocument {
       throw new ParseError(`cyclic Prev chain revisits offset ${offset} (§7.5.5 Table 15)`, offset);
     }
     visited.add(offset);
-    const section = parseXrefSection(bytes, origin, offset);
+    const section = await parseSection(bytes, origin, offset);
     sections.push(section);
     const prev = dictGet(section.trailer, 'Prev');
     if (prev === undefined) {
@@ -276,6 +396,30 @@ function readStartxref(bytes: Uint8Array): number {
   return offset;
 }
 
+/** Dispatch one cross-reference section: classic table (§7.5.4) or stream (§7.5.8). */
+async function parseSection(
+  bytes: Uint8Array,
+  origin: number,
+  offset: number,
+): Promise<XrefSection> {
+  const cur = new ByteCursor(bytes, origin + offset);
+  if (cur.matches(XREF_KEYWORD)) {
+    return parseXrefSection(bytes, origin, offset);
+  }
+  const b = cur.peek();
+  if (b >= 0x30 && b <= 0x39) {
+    // "N G obj" — the startxref offset shall point at the cross-reference
+    // stream object itself (§7.5.8.1).
+    return parseXrefStreamSection(bytes, origin, offset);
+  }
+  throw new ParseError(
+    'cross-reference section shall begin with the keyword xref (§7.5.4) or be a cross-reference stream object (§7.5.8.1)',
+    cur.pos,
+  );
+}
+
+const XREF_KEYWORD = [0x78, 0x72, 0x65, 0x66]; // xref
+
 /**
  * §7.5.4 — one cross-reference section: the keyword xref, one or more
  * subsections of fixed 20-byte entries, then the trailer dictionary.
@@ -285,18 +429,9 @@ function readStartxref(bytes: Uint8Array): number {
 function parseXrefSection(bytes: Uint8Array, origin: number, offset: number): XrefSection {
   const cur = new ByteCursor(bytes, origin + offset);
 
-  if (cur.matches([0x78, 0x72, 0x65, 0x66])) {
+  if (cur.matches(XREF_KEYWORD)) {
     cur.advance(4);
   } else {
-    // A digit here means startxref points at "N G obj" — a cross-reference
-    // stream (§7.5.8), which this slice does not read yet.
-    const b = cur.peek();
-    if (b >= 0x30 && b <= 0x39) {
-      throw new ParseError(
-        'startxref points at an indirect object: cross-reference streams (§7.5.8) are not supported yet',
-        cur.pos,
-      );
-    }
     throw new ParseError(
       'cross-reference section shall begin with the keyword xref (§7.5.4)',
       cur.pos,

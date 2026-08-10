@@ -17,8 +17,25 @@ export type {
   CosString,
 } from './cos/types.js';
 export { COS_FALSE, COS_NULL, COS_TRUE, dictGet, dictGetRaw } from './cos/types.js';
-export type { XrefEntry, XrefFree, XrefInUse, XrefSection } from './file/file-parser.js';
+export type {
+  XrefCompressed,
+  XrefEntry,
+  XrefFree,
+  XrefInUse,
+  XrefSection,
+  XrefUnknown,
+} from './file/file-parser.js';
 export { PdfDocument, parsePdf } from './file/file-parser.js';
+export type { ParsedObjectStream } from './file/object-stream.js';
+export { loadObjectStream, objectFromStream } from './file/object-stream.js';
+export { type DecodeOptions, decodeStream } from './filter/decode.js';
+export { FilterError } from './filter/error.js';
+export { inflate } from './filter/inflate.js';
+export {
+  applyPredictor,
+  DEFAULT_PREDICTOR_PARMS,
+  type PredictorParms,
+} from './filter/predictor.js';
 export {
   EOF,
   hexValue,
