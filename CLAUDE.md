@@ -7,11 +7,13 @@
 
 | 知りたいこと | 正典 |
 |---|---|
+| **全体地図と進捗（設計→実装→試験→運用）** | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
 | 何を作り何を作らないか・API 粒度・移行段階 0〜4・適合性コーパス | [`docs/DESIGN.md`](docs/DESIGN.md) |
 | 実装が守る不変条件（G-A〜G-E）・検証ループ手順（G-1〜G-6）・テスト規律（T-1〜T-4） | [`docs/GUARDS.md`](docs/GUARDS.md) |
 | 置き換える対象の失敗モード（pdf-lib W-1〜W-4 / pdfnative F-1〜F-6） | [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) |
 | 看板・主張の線引き（書ける/書けない）・公開チャネル・競合監視 | [`docs/PUBLISHING.md`](docs/PUBLISHING.md) |
 | 言語選定（TypeScript・Accepted） | [`docs/adr/0001-language-choice.md`](docs/adr/0001-language-choice.md) |
+| 型の厳格性ポリシー（tsconfig フラグ・any 禁止・逃げ道の規律） | [`docs/adr/0002-type-strictness.md`](docs/adr/0002-type-strictness.md) |
 | 名前の経緯・ドメイン（normativepdf.dev） | [`NAMING.md`](NAMING.md) |
 | 未整理のアイデア置き場 | [`docs/IDEAS.md`](docs/IDEAS.md) |
 
