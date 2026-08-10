@@ -32,3 +32,6 @@ export {
 export { ByteCursor } from './syntax/byte-cursor.js';
 export type { Token } from './syntax/lexer.js';
 export { isTokenBoundary, LexError, nextToken } from './syntax/lexer.js';
+export type { IndirectObject, ParseObjectOptions } from './syntax/object-parser.js';
+export { ParseError, parseIndirectObject, parseObject } from './syntax/object-parser.js';
+export { TokenReader } from './syntax/token-reader.js';
