@@ -1,0 +1,49 @@
+{
+  "name": "normativepdf",
+  "version": "0.0.0",
+  "description": "Clause-driven PDF library in pure TypeScript. Every behaviour tied to an ISO 32000 clause; what cannot be tied is not claimed.",
+  "keywords": [
+    "pdf",
+    "iso-32000",
+    "pdf-2.0",
+    "typescript"
+  ],
+  "author": "shuji-bonji",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shuji-bonji/normativepdf.git"
+  },
+  "homepage": "https://normativepdf.dev",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.ja.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "biome check src tests",
+    "format": "biome format --write src tests"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
