@@ -18,8 +18,9 @@
  *       not a regression. The gate: every "pass" specimen (a file veraPDF
  *       judges COMPLIANT, so a structure library must read it) shall
  *       parse — a pass-specimen failure exits 1. Baseline 2026-08-11:
- *       2884/2907, all 23 failures are fail specimens (20 broken §6.1
- *       file structures, 2 encrypted, 1 Isartor broken xref entry).
+ *       2881/2907, all 26 failures are fail specimens (23 intentionally
+ *       broken file structures incl. 3 catalog /Version "/2,0" specimens,
+ *       2 encrypted, 1 Isartor broken xref entry).
  *
  * (requires `npm run build` first)
  */

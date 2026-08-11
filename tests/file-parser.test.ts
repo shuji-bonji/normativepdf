@@ -125,6 +125,30 @@ describe('xref entry format (§7.5.4: exactly 20 bytes)', () => {
     expect((await doc.getCatalog()).kind).toBe('dict');
   });
 
+  it('upgrades the version from a later catalog /Version (§7.7.2 Table 29; incremental-update mechanism of §7.5.2 NOTE 3)', async () => {
+    const doc = await parsePdf(
+      buildPdf(['1 0 obj << /Type /Catalog /Version /2.0 >> endobj\n']).bytes,
+    );
+    expect(doc.headerVersion).toBe('1.7');
+    expect(doc.version).toBe('2.0');
+  });
+
+  it('keeps the header version when it is later than the catalog /Version (Table 29: "the header specifies a later version")', async () => {
+    const doc = await parsePdf(
+      buildPdf(['1 0 obj << /Type /Catalog /Version /1.4 >> endobj\n'], {
+        header: '%PDF-2.0\n',
+      }).bytes,
+    );
+    expect(doc.headerVersion).toBe('2.0');
+    expect(doc.version).toBe('2.0');
+  });
+
+  it('rejects a catalog /Version that is not a name (Table 29: "shall be a name object, not a number")', async () => {
+    await expect(
+      parsePdf(buildPdf(['1 0 obj << /Type /Catalog /Version 2.0 >> endobj\n']).bytes),
+    ).rejects.toThrow(/Table 29/);
+  });
+
   it('accepts a startxref that points at the EOL just before the xref keyword (measured: veraPDF-corpus 6-6-2-3-2-t01-pass-c)', async () => {
     const b = buildPdf([CATALOG]);
     // Point startxref one byte early, at the EOL preceding `xref`. The

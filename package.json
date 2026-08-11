@@ -1,11 +1,13 @@
 {
   "name": "normativepdf",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Clause-driven PDF library in pure TypeScript. Every behaviour tied to an ISO 32000 clause; what cannot be tied is not claimed.",
   "keywords": [
     "pdf",
+    "pdf-parser",
     "iso-32000",
     "pdf-2.0",
+    "cos",
     "typescript"
   ],
   "author": "shuji-bonji",
@@ -15,7 +17,6 @@
     "url": "git+https://github.com/shuji-bonji/normativepdf.git"
   },
   "homepage": "https://normativepdf.dev",
-  "private": true,
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -36,6 +37,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run typecheck && npm test && npm run check && npm run build && node scripts/parse-corpus.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "corpus:fetch": "node scripts/fetch-corpus.mjs",

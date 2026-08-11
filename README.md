@@ -1,108 +1,116 @@
 # normativepdf
 
-> **条文駆動の PDF ライブラリ。** すべての挙動を ISO の条項に紐づけ、紐づけられないものは主張しない。
+> **A clause-driven PDF library in pure TypeScript.** Every behaviour is tied to a clause of the ISO specifications; what cannot be tied is not claimed.
 >
-> 🚧 **開発初期。** 設計は確定済み（2026-08-08・[`docs/DESIGN.md`](docs/DESIGN.md)）、
-> 実装は段階 0（COS オブジェクトモデル + パーサ）から。コードはまだ無い。
-> 名前の選定経緯は [`NAMING.md`](NAMING.md)、公開計画は [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+> 🚧 **Early development.** Stage 0 (COS object model + parser) is implemented and measured against public corpora. Not yet published to npm.
+>
+> 日本語版: [README.ja.md](README.ja.md)
 
 ---
 
-## 何を作るのか
+## What this aims to be
 
-**出力が veraPDF を通ることを、リリースごとに証明する TypeScript の PDF ツールチェーン。**
-目指すのは**汎用の純 TypeScript PDF ライブラリ**です。最初の一歩として、
-PDF family の `pdf-lib` への委譲を解消する構造層から作り始めます —
-family は最初の利用者であって、ターゲットではありません。
+**A TypeScript PDF toolchain that proves, release by release, that its output passes veraPDF.**
 
-「pdf-lib の後継」は名乗りません（その席は `@cantoo/pdf-lib` が埋めています）。
-空いているのは「作れる」ではなく **「測ってある」** です — 詳細は [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+The goal is a general-purpose, pure-TypeScript PDF library. It does not claim to be
+"the pdf-lib successor" — that seat is taken. The empty seat in the JS/TS ecosystem is
+not *"can build PDFs"* but ***"is measured"***: no JS/TS library today demonstrates,
+release by release, that its output passes an independent validator. This library is
+built to sit there ([docs/PUBLISHING.md](docs/PUBLISHING.md)).
 
-PDF family（`pdf-spec-mcp` / `pdf-reader-mcp` / `pdf-writer-mcp` / `pdf-verify-mcp`）は
-仕様原文・読み・書き・検証を分離して持っていますが、**書き手の実体は `pdf-lib` に委譲**しています。
-その結果、条文違反を特定できても直せない状態が生じています（[`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) の W-2〜W-4）。
+Its first consumer is the PDF family of MCP servers
+([pdf-spec-mcp](https://github.com/shuji-bonji/pdf-agent-stack) / pdf-reader-mcp /
+pdf-writer-mcp / pdf-verify-mcp), whose writer currently delegates to `pdf-lib` — with
+the result that clause violations can be *identified* but not *fixed*
+([docs/PRIOR-ART.md](docs/PRIOR-ART.md)). The family is the first user, not the target.
 
-このライブラリは、その委譲を解消するために作ります。
+## Current state (stage 0, 2026-08-11)
 
-## 射程
-
-| ターゲット | 状態 |
+| Gate | Result |
 |---|---|
-| **ISO 32000-1:2008**（PDF 1.7） | ✅ 対象 |
-| **ISO 32000-2:2020**（PDF 2.0）+ Errata Collection 3 | ✅ 対象 |
-| **ISO 14289-1 / -2**（PDF/UA-1 / UA-2） | ✅ 対象 |
-| **ISO/TS 32001〜32005** | ✅ 対象（UA-2 は TS 32005 をハード要件とする） |
-| **ISO 19005-1〜4**（PDF/A） | ⏸ **保留** |
+| [pdf20examples](https://github.com/pdf-association/pdf20examples) (CC BY-SA 4.0) | **7/7 parsed** end-to-end (every in-use/compressed object resolved, catalog included) |
+| [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus) (CC BY 4.0, 2907 specimens, Isartor included) | **99.1% parsed; every *pass* specimen parses.** The 26 failures are all intentionally broken *fail* specimens, rejected with the violated clause named |
 
-### なぜ PDF/A を保留するのか
+Implemented: COS object model (10-type discriminated union), lexer, object parser,
+file-structure parser (classic xref, trailer, `Prev` chain, incremental updates),
+cross-reference streams, object streams, FlateDecode + PNG/TIFF predictors,
+catalog `/Version` upgrade (Table 29). Every error message cites the clause it enforces.
 
-**条文を手元に持っていないからです。** ISO 19005 は有償で、無償配布されていません。
+Recovery parsing is demand-driven: leniency is added only when a specimen that an
+independent validator accepts fails to parse — each relaxation records the specimen
+that forced it.
 
-条文なしに「PDF/A 対応」を名乗ると、検証器の出力に合わせて実装を調整するだけの
-**検証器駆動**になり、veraPDF への過適合を招きます。
-これは PDF family の射程定義（`~/workspace/shuji-bonji/Document-Note/mcps/PDFfamily/specs/09-family-scope.md` §2）で
-**T2（機械判定のみ）**として明示的に区別している領域です。
+## Scope
 
-**ただし、名乗らないことと通らないことは別です。**
-PDF/A の要件の大半は 32000-1/-2 の機能制限（フォント埋め込み必須・暗号化禁止・OutputIntent 必須・
-透明度制限）であり、**32000-1/-2 に厳密な実装は PDF/A の土台をほぼ満たします。**
+| Target | Status |
+|---|---|
+| **ISO 32000-1:2008** (PDF 1.7) | ✅ in scope |
+| **ISO 32000-2:2020** (PDF 2.0) + Errata Collection 3 | ✅ in scope |
+| **ISO 14289-1 / -2** (PDF/UA-1 / UA-2) | ✅ in scope |
+| **ISO/TS 32001–32005** | ✅ in scope (UA-2 treats TS 32005 as a hard requirement) |
+| **ISO 19005-1–4** (PDF/A) | ⏸ **on hold** |
 
-| | 実力 | 主張 |
-|---|---|---|
-| このライブラリ | veraPDF を通せる | **PDF/A とは名乗らない** |
-| （比較）pdfnative | Latin 既定で veraPDF 不合格 | PDF/A-2b を XMP に書く |
+### Why PDF/A is on hold
 
-採用実績が増えるかスポンサーが付いた時点で ISO 19005-2 を調達し、初めて主張に格上げします。
-それまでは無償資源（veraPDF validation profiles / PDF Association TechNote 0010）で補います。
+**Because we do not hold the normative text.** ISO 19005 is a paid standard.
+Claiming "PDF/A support" without the text degenerates into validator-driven
+development — tuning the implementation to veraPDF's output instead of the standard.
 
-## 設計方針（要点）
+Claiming and passing are different things, though: most PDF/A requirements are
+functional restrictions of ISO 32000 (embedded fonts, no encryption, OutputIntent,
+transparency limits), so an implementation strict about 32000-1/-2 covers most of the
+ground. This library aims to *pass* veraPDF without *claiming* ISO 19005 conformance,
+until the standard is acquired. What may and may not be claimed is fixed in
+[docs/PUBLISHING.md](docs/PUBLISHING.md).
 
-1. **戦う範囲は構造層。** XMP・構造木・タグ・フォント辞書・オブジェクト構文。
-   テキストシェイピング（GSUB/GPOS・BiDi・複雑文字体系）は**別ドメインの沼**であり、当面は戦わない。
-2. **PDF/UA を後付けにしない。** タグ付きを一級市民として設計する。`pdf-lib` で最も苦労している層。
-3. **主張と実体を乖離させない。** 適合を主張するなら、その要件を満たせないときは書かずに落ちる（[`docs/GUARDS.md`](docs/GUARDS.md)）。
-4. **PDF 2.0 を基盤にする。** ISO 14289-2 §6.2 が ISO 32000-2 + TS 32005 をハード要件とするため、
-   PDF 1.7 基盤の実装は PDF/UA-2 に原理的に到達できない。
+## Design principles
 
-詳細は [`docs/DESIGN.md`](docs/DESIGN.md)。
+1. **The battleground is the structure layer.** XMP, structure tree, tags, font
+   dictionaries, object syntax. Text shaping (GSUB/GPOS, BiDi, complex scripts) is a
+   different swamp and is not fought here.
+2. **Tagged PDF is a first-class citizen**, not an afterthought — the layer where
+   `pdf-lib` struggles most.
+3. **Claims never drift from reality.** Code that writes a conformance declaration is
+   closed over the same function that checks the requirements; if it cannot check, it
+   does not write ([docs/GUARDS.md](docs/GUARDS.md)).
+4. **PDF 2.0 is the foundation.** ISO 14289-2 §6.2 requires ISO 32000-2 + TS 32005, so
+   a PDF 1.7-based implementation cannot reach PDF/UA-2 even in principle.
+5. **Deterministic output.** No hidden clock or randomness; `/ID`, dates, and
+   signatures are injected explicitly.
 
-## 開発の進め方
+## Development loop
 
-**検証器を先に完成させてから実装を書く**（テスト駆動の極大版）。
+The validator was finished before the implementation was started — test-driven
+development at its largest scale:
 
 ```
-pdf-spec-mcp   条文（何が正しいか）
+pdf-spec-mcp    the clause (what is correct) — consulted before every decision
       ↓
-   実装を書く
+  implement
       ↓
-pdf-reader-mcp 読み戻して入力と照合
+  read back     independent implementations (qpdf --check / poppler / veraPDF)
       ↓
-pdf-verify-mcp veraPDF で機械採点
+pdf-verify-mcp  mechanical scoring via veraPDF
       ↓
-   条文に戻って差分を潰す
+  back to the clause, close the gap
 ```
 
-このループの手順則は [`docs/GUARDS.md`](docs/GUARDS.md) に G-1〜G-6 として固定しています。
-**exit 0 を成功と読まない**、**宣言と検証をペアで呼ぶ**、**変換系は入力と出力の差分で採点する** など、
-すべて実測から出たものです。
+The loop's invariants are fixed as G-1–G-6 in [docs/GUARDS.md](docs/GUARDS.md):
+never read exit 0 as success, always pair a declaration with its verification, score
+conversions by diffing input against output. All of them came from measurements.
 
-## 言語
+## Language
 
-**TypeScript（確定・2026-08-08）。** 理由の中核は査読可能性。
-経緯は [`docs/adr/0001-language-choice.md`](docs/adr/0001-language-choice.md)（Accepted）。
+**TypeScript** (decided 2026-08-08; reviewability was the deciding factor).
+See [docs/adr/0001-language-choice.md](docs/adr/0001-language-choice.md).
 
-## 想定される利用先
+## Intended consumers
 
-- `pdf-writer-mcp` の `pdf-lib` 依存の置き換え
-- Editor PWA
-- e-shiwake の PDF 操作（電帳法・PDF/A-3 添付）
+- `pdf-writer-mcp` — replacing its `pdf-lib` dependency
+- a PDF editor PWA
+- [e-shiwake](https://github.com/shuji-bonji) — invoice issuing (digital signatures,
+  PDF/A-3 attachments for Japanese e-bookkeeping law)
 
-## 関連
+## License
 
-> ⚠️ 以下 `~/workspace/shuji-bonji/` 配下の参照は**作業環境内の非公開資料**であり、
-> 公開リポジトリからは解決しません。公開時に必要な内容は
-> [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) / [`docs/GUARDS.md`](docs/GUARDS.md) に転記済みです。
-
-- `~/workspace/shuji-bonji/Document-Note/mcps/PDFfamily/specs/09-family-scope.md` — PDF family の射程定義（**正典**）
-- `~/workspace/shuji-bonji/Document-Note/mcps/PDFfamily/specs/00-overview.md` — family 全体俯瞰
-- `~/workspace/shuji-bonji/mcps/pdfnative-audit/AUDIT-2026-07-20.md` — 先行実装の受入監査
+[MIT](LICENSE)

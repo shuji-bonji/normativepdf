@@ -58,8 +58,8 @@ JS/TS 圏に、出力が veraPDF を通ることをリリースごとに示し�
 
 | チャネル | 現状 | 計画 |
 |---|---|---|
-| GitHub `shuji-bonji/normativepdf` | 公開済み・README は日本語のみ | **公開露出前に README.md = 英語 / README.ja.md = 日本語へ転換**（需要が EU 側にあるため英語が主）。翻訳は deepl / xcomet / dtir パイプラインで品質を測りながら |
-| npm `normativepdf` | **未取得** | 段階 0 の初回公開時に確保。⚠️ 名前の先取りリスクをどう扱うか（プレースホルダ公開の是非）は未決 |
+| GitHub `shuji-bonji/normativepdf` | **README.md = 英語 / README.ja.md = 日本語へ転換済み（2026-08-11）** | 現在地（コーパス門番の数字）を README に載せ、更新時は実測値と同期する |
+| npm `normativepdf` | **0.1.0 公開済み（2026-08-11・静かな公開 = 告知なし）。公開版検証 PASS**（31 エクスポート一致・実パース・/Version 格上げ動作） | 目的は名前確保 + reader/verify の依存解決のみ（プレースホルダでなく段階 0 の実体で確保）。**お披露目（告知・normativepdf.dev・veraPDF レポート同梱）は v1.0 で行う** = 看板「リリースごとに証明」が実演できるのは生成パス（Phase 3）以降のため |
 | `normativepdf.dev` | ドメイン取得済み（2026-07-20・Value-Domain）・**DNS 未設定** | 紹介コンテンツ + リファレンス。`.dev` は HSTS プリロード TLD なので HTTPS 必須（GitHub Pages で可）。リファレンスは pdf-agent-stack サイトと同じ規律 = **実応答からの生成のみ・ja は翻訳メモリで md5 同期** |
 
 ## 5. 指標

@@ -93,7 +93,13 @@ export class PdfDocument {
   readonly bytes: Uint8Array;
   /** Byte index of the PERCENT SIGN of %PDF- — the offset origin (§7.5.2). */
   readonly origin: number;
-  /** Header version, e.g. "1.7" or "2.0" (§7.5.2). */
+  /** Header version as written, e.g. "1.7" (§7.5.2) — before any catalog /Version upgrade. */
+  readonly headerVersion: string;
+  /**
+   * Effective version: the catalog /Version if later than the header
+   * (§7.7.2 Table 29; the mechanism for upgrading the version in an
+   * incremental update, §7.5.2 NOTE 3), otherwise the header version.
+   */
   readonly version: string;
   /** Trailer dictionary of the most recent cross-reference section (§7.5.5). */
   readonly trailer: CosDict;
@@ -107,12 +113,14 @@ export class PdfDocument {
   constructor(
     bytes: Uint8Array,
     origin: number,
+    headerVersion: string,
     version: string,
     trailer: CosDict,
     xref: ReadonlyMap<number, XrefEntry>,
   ) {
     this.bytes = bytes;
     this.origin = origin;
+    this.headerVersion = headerVersion;
     this.version = version;
     this.trailer = trailer;
     this.xref = xref;
@@ -350,7 +358,56 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
     }
   }
 
-  return new PdfDocument(bytes, origin, version, newest.trailer, merged);
+  const doc = new PdfDocument(bytes, origin, version, version, newest.trailer, merged);
+
+  // §7.7.2 Table 29 Version: "The version of the PDF specification to which
+  // the document conforms … if later than the version specified in the
+  // file's header. If the header specifies a later version, or if this
+  // entry is absent, the document shall conform to the version specified
+  // in the header." This is how an incremental update upgrades the version
+  // (§7.5.2 NOTE 3) — the pdf20examples incremental-save specimen carries
+  // header 1.7 and catalog /Version /2.0.
+  const catalogVersion = await readCatalogVersion(doc);
+  if (catalogVersion !== undefined && isLaterVersion(catalogVersion, version)) {
+    return new PdfDocument(bytes, origin, version, catalogVersion, newest.trailer, merged);
+  }
+  return doc;
+}
+
+/**
+ * Read the catalog /Version if present. Table 29: "The value of this entry
+ * shall be a name object, not a number" — a non-name value is an error.
+ * A missing or non-dict catalog is not this function's concern (Root
+ * problems surface via getCatalog), so it reads as "no entry".
+ */
+async function readCatalogVersion(doc: PdfDocument): Promise<string | undefined> {
+  const root = dictGet(doc.trailer, 'Root');
+  if (root === undefined) {
+    return undefined;
+  }
+  const catalog = await doc.resolve(root);
+  if (catalog.kind !== 'dict') {
+    return undefined;
+  }
+  const value = dictGet(catalog, 'Version');
+  if (value === undefined) {
+    return undefined;
+  }
+  const resolved = await doc.resolve(value);
+  if (resolved.kind !== 'name' || !/^[12]\.[0-9]$/.test(resolved.value)) {
+    throw new ParseError(
+      'catalog Version shall be a name object of the form 1.n or 2.n (§7.7.2 Table 29; §7.5.2)',
+      doc.origin,
+    );
+  }
+  return resolved.value;
+}
+
+/** Numeric comparison of "M.n" version strings (§7.5.2 grammar guarantees the shape). */
+function isLaterVersion(a: string, b: string): boolean {
+  const [aMajor = 0, aMinor = 0] = a.split('.').map(Number);
+  const [bMajor = 0, bMinor = 0] = b.split('.').map(Number);
+  return aMajor !== bMajor ? aMajor > bMajor : aMinor > bMinor;
 }
 
 /**
