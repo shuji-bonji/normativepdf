@@ -38,6 +38,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "corpus:fetch": "node scripts/fetch-corpus.mjs",
+    "corpus:parse": "npm run build && node scripts/parse-corpus.mjs",
     "check": "biome check src tests",
     "format": "biome format --write src tests"
   },

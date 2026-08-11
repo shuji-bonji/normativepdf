@@ -209,6 +209,13 @@ describe('tail structure (§7.5.5)', () => {
     await expect(parsePdf(b.bytes)).rejects.toThrow(/startxref/);
   });
 
+  it('accepts white-space between the last entry and trailer (§7.2.3; the PDF Association incremental-save example has a blank line there)', async () => {
+    const b = buildPdf([CATALOG, STRING_OBJ]);
+    const spaced = b.text.replace('trailer\n', '\r\n\ntrailer\n');
+    const doc = await parsePdf(enc(spaced));
+    expect((await doc.getObject(2, 0)).kind).toBe('string');
+  });
+
   it('rejects a comment between xref and trailer (§7.5.4, 2020 clarification)', async () => {
     const b = buildPdf([CATALOG]);
     const broken = b.text.replace('trailer\n', '%comment\ntrailer\n');

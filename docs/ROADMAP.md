@@ -47,9 +47,9 @@ flowchart LR
 - [x] オブジェクトパーサ（8 種 + 間接参照 + obj/endobj + stream 本体。§7.3.10 補完取得済み・Length 間接は resolver フック・smoke 8/8 + T-3 実測 = 検査を外すと落ちる、を確認。2026-08-11）
 - [ ] ファイル構造パーサ（header / xref テーブル / trailer）
 - [ ] xref ストリーム・オブジェクトストリームの読み
-- [ ] 回復パース（壊れた xref・嘘の startxref）
-- [ ] コーパス取り込み（pdf20examples / veraPDF-corpus・取得方法とライセンス表記）
-- [ ] **受入: コーパス全件パース通過**
+- [ ] 回復パース（壊れた xref・嘘の startxref）— **実測駆動で作る**: pdf20examples では要求ゼロ（strict 側の過剰 1 件を条文で緩和しただけ）。veraPDF-corpus・壊れ検体で要求が立った分のみ実装
+- [x] コーパス取り込み（pdf20examples・`scripts/fetch-corpus.mjs` = 出所/ライセンス明記・corpus/ は gitignore。veraPDF-corpus は次段）
+- [x] **受入: pdf20examples 全 7 検体パース通過（2026-08-11・`scripts/parse-corpus.mjs`。全 in-use/compressed オブジェクトの getObject + catalog 解決まで）**。実測が直させた 1 件 = xref エントリと trailer の間の空白は合法（§7.2.3。禁止はコメントのみ = §7.5.4）— PDF Association 純正検体が空行を持っていた。⚠️ 既知の残: catalog /Version による版の格上げ（§7.5.2）は未参照（incremental save 検体は header 1.7 のまま報告される）
 - [ ] reader / verify から使わせる（最初の 2 消費者・既存テスト全緑）
 - [ ] SKILL.md の TODO を実測で埋める（ビルド/テストコマンド・コーパス実行手順）
 

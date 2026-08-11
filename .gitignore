@@ -1,4 +1,5 @@
 node_modules/
 dist/
+corpus/
 *.timestamp-*
 .DS_Store

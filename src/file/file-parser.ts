@@ -31,6 +31,7 @@
 
 import type { CosDict, CosObject, CosRef } from '../cos/types.js';
 import { COS_NULL, dictGet } from '../cos/types.js';
+import { isWhitespace } from '../syntax/byte-classes.js';
 import { ByteCursor } from '../syntax/byte-cursor.js';
 import { ParseError, parseIndirectObject, parseObject } from '../syntax/object-parser.js';
 import { TokenReader } from '../syntax/token-reader.js';
@@ -443,6 +444,13 @@ function parseXrefSection(bytes: Uint8Array, origin: number, offset: number): Xr
 
   const entries = new Map<number, XrefEntry>();
   for (;;) {
+    // White-space is a separator here per the general rule of §7.2.3;
+    // what §7.5.4 prohibits between xref and trailer is *comments* — so
+    // Table 1 white-space is skipped, '%' is not. (The PDF Association's
+    // own incremental-save example puts a blank line before `trailer`.)
+    while (isWhitespace(cur.peek())) {
+      cur.advance();
+    }
     const b = cur.peek();
     if (b >= 0x30 && b <= 0x39) {
       readSubsection(cur, entries);
