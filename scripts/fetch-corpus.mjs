@@ -3,14 +3,24 @@
  * Fetch the stage-0 conformance corpus (docs/DESIGN.md §5.2).
  *
  * pdf-association/pdf20examples — PDF 2.0 example files.
- * License: CC BY-SA 4.0 (https://github.com/pdf-association/pdf20examples/blob/master/LICENSE.md)
+ *   License: CC BY-SA 4.0 (https://github.com/pdf-association/pdf20examples/blob/master/LICENSE.md)
+ * veraPDF/veraPDF-corpus — PDF/A all levels + PDF/UA-1/UA-2 + ISO 32000-1/-2
+ *   extra specimens + Isartor test suite (bundled). Default branch: `staging`.
+ *   License: CC BY 4.0 (https://github.com/veraPDF/veraPDF-corpus/blob/staging/README.md)
+ *
  * The files are downloaded, not vendored; corpus/ is gitignored.
  *
  * Usage: node scripts/fetch-corpus.mjs
  */
 
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+const corpusRoot = join(import.meta.dirname, '..', 'corpus');
+
+// --- pdf20examples: 7 individual files over raw.githubusercontent.com ---
 
 const BASE = 'https://raw.githubusercontent.com/pdf-association/pdf20examples/master/';
 const FILES = [
@@ -23,7 +33,7 @@ const FILES = [
   'pdf20-utf8-test.pdf',
 ];
 
-const dir = join(import.meta.dirname, '..', 'corpus', 'pdf20examples');
+const dir = join(corpusRoot, 'pdf20examples');
 await mkdir(dir, { recursive: true });
 
 let failed = 0;
@@ -43,7 +53,34 @@ for (const file of FILES) {
   }
 }
 
+// --- veraPDF-corpus: shallow git clone of the `staging` default branch ---
+
+const veraDir = join(corpusRoot, 'veraPDF-corpus');
+if (existsSync(veraDir)) {
+  console.log(`OK  veraPDF-corpus already present at ${veraDir} (delete to re-fetch)`);
+} else {
+  const clone = spawnSync(
+    'git',
+    [
+      'clone',
+      '--depth',
+      '1',
+      '--branch',
+      'staging',
+      'https://github.com/veraPDF/veraPDF-corpus.git',
+      veraDir,
+    ],
+    { stdio: 'inherit' },
+  );
+  if (clone.status !== 0) {
+    failed += 1;
+    console.error('NG  veraPDF-corpus: git clone failed');
+  } else {
+    console.log(`OK  veraPDF-corpus cloned to ${veraDir}`);
+  }
+}
+
 if (failed > 0) {
   process.exit(1);
 }
-console.log(`\n${FILES.length} files in ${dir}`);
+console.log(`\ncorpus ready under ${corpusRoot}`);

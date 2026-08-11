@@ -117,10 +117,21 @@ describe('xref entry format (§7.5.4: exactly 20 bytes)', () => {
     );
   });
 
-  it('rejects an entry for object 0 that is not free/65535 (§7.5.4)', async () => {
+  it('accepts a free-list head whose generation is not 65535 — R-7.5.4-31 is conformance, not function (veraPDF-corpus TWG A029-pdfa2-pass-b/-d)', async () => {
     const b = buildPdf([CATALOG]);
-    const broken = b.text.replace('0000000000 65535 f', '0000000000 00000 n');
-    await expect(parsePdf(enc(broken))).rejects.toThrow(/object 0/);
+    const deviant = b.text.replace('0000000000 65535 f', '0000000019 00000 f');
+    const doc = await parsePdf(enc(deviant));
+    expect(doc.xref.get(0)).toEqual({ type: 'free', nextFree: 19, generation: 0 });
+    expect((await doc.getCatalog()).kind).toBe('dict');
+  });
+
+  it('accepts a startxref that points at the EOL just before the xref keyword (measured: veraPDF-corpus 6-6-2-3-2-t01-pass-c)', async () => {
+    const b = buildPdf([CATALOG]);
+    // Point startxref one byte early, at the EOL preceding `xref`. The
+    // builder places `xref` at a known offset; recompute it from the text.
+    const at = b.text.indexOf('xref\n');
+    const early = b.text.replace(/startxref\n\d+\n/, `startxref\n${at - 1}\n`);
+    expect((await parsePdf(enc(early))).version).toBe('1.7');
   });
 });
 

@@ -115,7 +115,7 @@ async function buildPlain(): Promise<PdfDocument> {
  * 1 catalog (plain), 4 ObjStm holding objects 2 (string) and 3 (integer),
  * 5 the xref stream, 6 unknown entry type.
  */
-async function buildWithObjStm(): Promise<PdfDocument> {
+async function buildWithObjStm(extraTrailer = ''): Promise<PdfDocument> {
   const b = new Builder();
   b.add('%PDF-2.0\n');
   const off1 = b.add('1 0 obj << /Type /Catalog >> endobj\n');
@@ -150,7 +150,7 @@ async function buildWithObjStm(): Promise<PdfDocument> {
   const encoded = await deflate(upFilter(makeRows(off5), rowBytes));
   b.add(
     `5 0 obj << /Type /XRef /Size 7 /W [1 2 2] /Filter /FlateDecode ` +
-      `/DecodeParms << /Predictor 12 /Columns ${rowBytes} >> /Length ${encoded.length} /Root 1 0 R >> stream\n`,
+      `/DecodeParms << /Predictor 12 /Columns ${rowBytes} >> /Length ${encoded.length} /Root 1 0 R${extraTrailer} >> stream\n`,
   );
   b.add(encoded);
   b.add('\nendstream endobj\n');
@@ -189,6 +189,43 @@ describe('cross-reference streams (§7.5.8)', () => {
     const doc = await buildWithObjStm();
     expect(await doc.getObject(6, 0)).toEqual({ kind: 'null' });
     expect(doc.xref.get(6)).toEqual({ type: 'unknown', rawType: 9 });
+  });
+
+  it('accepts /W [1 2 0]: a width-0 generation field defaults to 0, and the table-only 65535 rule for object 0 does not apply to streams (§7.5.8.2 Table 17, §7.5.8.3 Table 18)', async () => {
+    // veraPDF-corpus writes /W [1 2 0] in 493 of 2907 specimens; with the
+    // generation field absent, the free head decodes as generation 0.
+    const W0 = [1, 2, 0] as const;
+    const b = new Builder();
+    b.add('%PDF-2.0\n');
+    const off1 = b.add('1 0 obj << /Type /Catalog >> endobj\n');
+    const rows = [
+      entry(W0, [0, 0]), //  obj 0: free — generation field not present
+      entry(W0, [1, off1]), // obj 1: in use, generation defaults to 0
+      entry(W0, [1, 0]), //   obj 2: the xref stream itself (patched below)
+    ];
+    const head = b.length;
+    rows[2] = entry(W0, [1, head]);
+    const dataLen = rows.reduce((a, r) => a + r.length, 0);
+    const data = new Uint8Array(dataLen);
+    let p = 0;
+    for (const r of rows) {
+      data.set(r, p);
+      p += r.length;
+    }
+    b.add(`2 0 obj << /Type /XRef /Size 3 /W [1 2 0] /Length ${dataLen} /Root 1 0 R >> stream\n`);
+    b.add(data);
+    b.add('\nendstream endobj\n');
+    b.add(`startxref\n${head}\n%%EOF\n`);
+    const doc = await parsePdf(b.bytes());
+    expect(doc.xref.get(0)).toEqual({ type: 'free', nextFree: 0, generation: 0 });
+    expect((await doc.getCatalog()).kind).toBe('dict');
+  });
+
+  it('names encryption instead of failing the filter: object streams in an encrypted file are ciphertext (§7.5.5 Table 15 Encrypt, §7.6)', async () => {
+    // Observed in veraPDF-corpus ("7.16-t01-fail-a.pdf"): without the gate
+    // the ciphertext reaches FlateDecode and the error blames the filter.
+    const doc = await buildWithObjStm(' /Encrypt << /Filter /Standard >>');
+    await expect(doc.getObject(2, 0)).rejects.toThrow(/encrypted PDF/);
   });
 
   it('rejects a wrong W shape (Table 17)', async () => {

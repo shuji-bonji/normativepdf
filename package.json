@@ -40,6 +40,7 @@
     "test": "vitest run",
     "corpus:fetch": "node scripts/fetch-corpus.mjs",
     "corpus:parse": "npm run build && node scripts/parse-corpus.mjs",
+    "corpus:survey": "npm run build && node scripts/parse-corpus.mjs --survey corpus/veraPDF-corpus",
     "check": "biome check src tests",
     "format": "biome format --write src tests"
   },

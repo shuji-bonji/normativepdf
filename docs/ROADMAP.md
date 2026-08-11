@@ -45,11 +45,10 @@ flowchart LR
 - [x] プロジェクト初期化（tsconfig = ADR-0002 §1・biome・vitest・ESM。2026-08-11）
 - [x] ByteCursor（境界検査を 1 箇所に閉じる）+ レキサ（2026-08-11・条文実例の smoke 12/12 PASS）
 - [x] オブジェクトパーサ（8 種 + 間接参照 + obj/endobj + stream 本体。§7.3.10 補完取得済み・Length 間接は resolver フック・smoke 8/8 + T-3 実測 = 検査を外すと落ちる、を確認。2026-08-11）
-- [ ] ファイル構造パーサ（header / xref テーブル / trailer）
-- [ ] xref ストリーム・オブジェクトストリームの読み
-- [ ] 回復パース（壊れた xref・嘘の startxref）— **実測駆動で作る**: pdf20examples では要求ゼロ（strict 側の過剰 1 件を条文で緩和しただけ）。veraPDF-corpus・壊れ検体で要求が立った分のみ実装
-- [x] コーパス取り込み（pdf20examples・`scripts/fetch-corpus.mjs` = 出所/ライセンス明記・corpus/ は gitignore。veraPDF-corpus は次段）
+- [x] 回復パース（壊れた xref・嘘の startxref）— **実測駆動**: veraPDF-corpus 全 2907 検体で要求が立った分のみ実装（2026-08-11）。(1) xref ストリームの W 幅 0 = 世代既定 0（§7.5.8.2 Table 17 / Table 18。493 検体・当初 §7.5.4 の 65535 検査を誤適用していた）(2) R-7.5.4-31（free 先頭 = 世代 65535）はエラーから受理へ降格 — 機能でなく適合の規則（TWG pass 検体 2 件が実測根拠・検査は verify の仕事 = DESIGN §4.2）(3) 嘘の startxref 第 1 号 = xref 直前の EOL を指す pass 検体 → 先頭空白スキップのみの最小回復 (4) 暗号化 PDF は「FlateDecode failed」でなく名指しエラー（§7.5.5 Table 15 Encrypt。復号は未実装のまま）。以後の回復要求は実の壊れ検体で立てる
+- [x] コーパス取り込み（pdf20examples + **veraPDF-corpus（CC BY 4.0・`staging` ブランチ・Isartor 同梱・2907 検体）**・`scripts/fetch-corpus.mjs` = 出所/ライセンス明記・corpus/ は gitignore）
 - [x] **受入: pdf20examples 全 7 検体パース通過（2026-08-11・`scripts/parse-corpus.mjs`。全 in-use/compressed オブジェクトの getObject + catalog 解決まで）**。実測が直させた 1 件 = xref エントリと trailer の間の空白は合法（§7.2.3。禁止はコメントのみ = §7.5.4）— PDF Association 純正検体が空行を持っていた。⚠️ 既知の残: catalog /Version による版の格上げ（§7.5.2）は未参照（incremental save 検体は header 1.7 のまま報告される）
+- [x] **受入: veraPDF-corpus 2884/2907（99.2%）・pass 検体は全件パース通過（2026-08-11・`npm run corpus:survey` = pass 検体の失敗のみ exit 1 の門番）**。落ちる 23 件は全て fail 検体 = §6.1 の意図的破損 20 + 暗号化 2 + Isartor の壊れ xref エントリ 1。hybrid XRefStm の要求は立たず（§7.5.8.4: 非対応リーダーは古典テーブル側を読む、で全検体通過）
 - [ ] reader / verify から使わせる（最初の 2 消費者・既存テスト全緑）
 - [ ] SKILL.md の TODO を実測で埋める（ビルド/テストコマンド・コーパス実行手順）
 

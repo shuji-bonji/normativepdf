@@ -234,6 +234,18 @@ export class PdfDocument {
       return existing;
     }
     const loading = (async (): Promise<ParsedObjectStream> => {
+      // §7.5.5 Table 15: Encrypt is "required if document is encrypted"
+      // (§7.6). Object streams in an encrypted file are encrypted as whole
+      // streams; inflating the ciphertext would fail with a misleading
+      // filter error (observed: veraPDF-corpus "7.16-t01-fail-a.pdf",
+      // "6-1-3-t02-fail-a.pdf" reported "FlateDecode failed"). Decryption
+      // is not implemented — name the real reason instead.
+      if (dictGet(this.trailer, 'Encrypt') !== undefined) {
+        throw new ParseError(
+          'encrypted PDF: stream decryption is not supported yet (§7.6; trailer Encrypt entry, §7.5.5 Table 15)',
+          this.origin,
+        );
+      }
       const entry = this.xref.get(streamObjectNumber);
       if (entry === undefined || entry.type !== 'in-use') {
         throw new ParseError(
@@ -338,16 +350,6 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
     }
   }
 
-  // §7.5.4: "The first entry in the table (object number 0) shall always be
-  // free and shall have a generation number of 65,535".
-  const zero = merged.get(0);
-  if (zero === undefined || zero.type !== 'free' || zero.generation !== 65535) {
-    throw new ParseError(
-      'cross-reference entry for object 0 shall be free with generation 65535 (§7.5.4)',
-      startxref,
-    );
-  }
-
   return new PdfDocument(bytes, origin, version, newest.trailer, merged);
 }
 
@@ -404,14 +406,24 @@ async function parseSection(
   offset: number,
 ): Promise<XrefSection> {
   const cur = new ByteCursor(bytes, origin + offset);
+  // Measured recovery (ROADMAP: 嘘の startxref, first live case): §7.5.5
+  // requires the offset of the section itself, but veraPDF-corpus
+  // "6-6-2-3-2-t01-pass-c.pdf" — a PDF/A *pass* specimen — points startxref
+  // at the EOL immediately before the xref keyword. Leading white-space is
+  // functionally unambiguous (§7.2.3: white-space separates syntactic
+  // constructs), so it is skipped before dispatching; anything else at the
+  // offset is still an error.
+  while (isWhitespace(cur.peek())) {
+    cur.advance();
+  }
   if (cur.matches(XREF_KEYWORD)) {
-    return parseXrefSection(bytes, origin, offset);
+    return parseXrefSection(bytes, origin, cur.pos - origin);
   }
   const b = cur.peek();
   if (b >= 0x30 && b <= 0x39) {
     // "N G obj" — the startxref offset shall point at the cross-reference
     // stream object itself (§7.5.8.1).
-    return parseXrefStreamSection(bytes, origin, offset);
+    return parseXrefStreamSection(bytes, origin, cur.pos - origin);
   }
   throw new ParseError(
     'cross-reference section shall begin with the keyword xref (§7.5.4) or be a cross-reference stream object (§7.5.8.1)',
@@ -473,6 +485,18 @@ function parseXrefSection(bytes: Uint8Array, origin: number, offset: number): Xr
     throw new ParseError('keyword trailer shall be followed by a dictionary (§7.5.5)', cur.pos);
   }
 
+  // R-7.5.4-31 ("the first entry in the table shall be free with generation
+  // 65,535") is deliberately NOT enforced here. It is a conformance rule,
+  // not a functional one: a free entry's generation plays no part in object
+  // resolution (free → null either way), and this parser enforces only what
+  // is needed for the file to function (module header; DESIGN §4.2 puts
+  // conformance checking on pdf-verify-mcp). Measured demand: veraPDF-corpus
+  // "TWG test suite A029-pdfa2-pass-b/-d.pdf" are PDF/A *pass* specimens
+  // whose free-list head reads `0000000019 00000 f`. For cross-reference
+  // streams no such rule exists at all — a width-0 third field defaults the
+  // generation to 0 (§7.5.8.2 Table 17 W; §7.5.8.3 Table 18 "Default
+  // value: 0"), which veraPDF-corpus writes as /W [1 2 0] in 493 of 2907
+  // specimens.
   return { entries, trailer };
 }
 
