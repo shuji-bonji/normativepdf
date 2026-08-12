@@ -11,9 +11,11 @@
  *   parser's.
  * - Cross-reference streams (§7.5.8) and object streams (§7.5.7) are
  *   handled; their decoding makes `parsePdf` and `getObject` async
- *   (ADR-0003). Hybrid-reference files (XRefStm, §7.5.8.4) are not read
- *   yet — the classic table wins, which §7.5.8.4 defines as acceptable
- *   for readers that do not support the hybrid mechanism.
+ *   (ADR-0003). Hybrid-reference files (XRefStm, §7.5.8.4) are read:
+ *   the stream's entries fold in behind the table's own, per the search
+ *   order the clause prescribes (section → XRefStm → Prev). Demand for
+ *   this came from the first consumer (pdf-verify-mcp's revision diff),
+ *   not from the corpus — veraPDF-corpus never exercised it.
  *
  * Clause anchors used throughout:
  * - §7.5.2: the file begins with %PDF– and "byte offsets shall be
@@ -74,10 +76,36 @@ export interface XrefUnknown {
 
 export type XrefEntry = XrefInUse | XrefFree | XrefCompressed | XrefUnknown;
 
-/** One cross-reference section (one `xref` keyword and its subsections + trailer). */
+/**
+ * One cross-reference section, kept apart from the others — the unit an
+ * incremental update writes (§7.5.6). `parsePdf` merges the chain for
+ * object resolution; consumers that need the revisions separated (e.g.
+ * revision diffing) read the chain via `readXrefChain` instead.
+ */
 export interface XrefSection {
+  /** Byte offset (from `origin`) this section was addressed at — the value startxref or Prev carried. */
+  readonly offset: number;
+  /**
+   * 'table' = classic table (§7.5.4); 'stream' = cross-reference stream
+   * (§7.5.8); 'hybrid' = table whose trailer carries XRefStm (§7.5.8.4) —
+   * the stream's entries are folded in behind the table's own.
+   */
+  readonly kind: 'table' | 'stream' | 'hybrid';
   readonly entries: ReadonlyMap<number, XrefEntry>;
   readonly trailer: CosDict;
+  /** Object number of the cross-reference stream itself ('stream'/'hybrid'), else undefined. */
+  readonly selfObjectNumber: number | undefined;
+}
+
+/** A walked cross-reference chain, newest section first (§7.5.4/§7.5.6). */
+export interface XrefChain {
+  /** Byte index of the PERCENT SIGN of %PDF- — the offset origin (§7.5.2). */
+  readonly origin: number;
+  /** Header version as written (§7.5.2), before any catalog /Version upgrade. */
+  readonly headerVersion: string;
+  /** The offset the final startxref carried (§7.5.5). */
+  readonly startxref: number;
+  readonly sections: readonly XrefSection[];
 }
 
 const HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
@@ -297,18 +325,23 @@ export class PdfDocument {
   }
 }
 
-/** Parse a complete PDF file (classic cross-reference tables and cross-reference streams). */
-export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
+/**
+ * Walk the cross-reference chain (startxref → Prev → …), newest section
+ * first, WITHOUT merging — the per-revision view (§7.5.4/§7.5.6). Prev
+ * works identically for tables (Table 15) and streams (Table 17); a
+ * hybrid section's XRefStm (§7.5.8.4 Table 19) is folded into its own
+ * section, and the chain follows the table trailer's Prev (an XRefStm's
+ * own Prev "is not meaningful in hybrid-reference files", Table 17).
+ * Strict: an unreadable or cyclic chain is an error, not a shorter chain.
+ */
+export async function readXrefChain(bytes: Uint8Array): Promise<XrefChain> {
   const origin = indexOfSeq(bytes, HEADER, 0);
   if (origin < 0) {
     throw new ParseError('no %PDF- header found (§7.5.2)', 0);
   }
-  const version = readHeaderVersion(bytes, origin);
+  const headerVersion = readHeaderVersion(bytes, origin);
   const startxref = readStartxref(bytes);
 
-  // Walk the Prev chain, newest section first (§7.5.4, §7.5.6). Prev works
-  // identically for tables (Table 15) and streams (Table 17). Hybrid files'
-  // XRefStm (Table 19) is deliberately not followed yet.
   const sections: XrefSection[] = [];
   const visited = new Set<number>();
   let offset: number | undefined = startxref;
@@ -328,6 +361,32 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
       throw new ParseError('trailer Prev shall be a direct integer (§7.5.5 Table 15)', offset);
     }
   }
+  return { origin, headerVersion, startxref, sections };
+}
+
+/**
+ * Parse the single cross-reference section addressed at `offset` (a value
+ * a startxref or Prev carried). `origin` defaults to the %PDF- header
+ * position (§7.5.2). Exposed for consumers that walk the file themselves
+ * with their own recovery policy (first consumer: pdf-verify-mcp's
+ * revision diff, which tries older startxref targets when the newest is
+ * unreadable — a policy this library deliberately does not own).
+ */
+export async function readXrefSectionAt(
+  bytes: Uint8Array,
+  offset: number,
+  origin?: number,
+): Promise<XrefSection> {
+  const at = origin ?? indexOfSeq(bytes, HEADER, 0);
+  if (at < 0) {
+    throw new ParseError('no %PDF- header found (§7.5.2)', 0);
+  }
+  return parseSection(bytes, at, offset);
+}
+
+/** Parse a complete PDF file (classic tables, cross-reference streams, hybrid files). */
+export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
+  const { origin, headerVersion: version, startxref, sections } = await readXrefChain(bytes);
 
   const newest = sections[0];
   if (newest === undefined) {
@@ -456,7 +515,7 @@ function readStartxref(bytes: Uint8Array): number {
   return offset;
 }
 
-/** Dispatch one cross-reference section: classic table (§7.5.4) or stream (§7.5.8). */
+/** Dispatch one cross-reference section: classic table (§7.5.4), stream (§7.5.8), or hybrid (§7.5.8.4). */
 async function parseSection(
   bytes: Uint8Array,
   origin: number,
@@ -474,18 +533,62 @@ async function parseSection(
     cur.advance();
   }
   if (cur.matches(XREF_KEYWORD)) {
-    return parseXrefSection(bytes, origin, cur.pos - origin);
+    const table = parseXrefSection(bytes, origin, cur.pos - origin, offset);
+    return foldXrefStm(bytes, origin, table);
   }
   const b = cur.peek();
   if (b >= 0x30 && b <= 0x39) {
     // "N G obj" — the startxref offset shall point at the cross-reference
     // stream object itself (§7.5.8.1).
-    return parseXrefStreamSection(bytes, origin, cur.pos - origin);
+    return parseXrefStreamSection(bytes, origin, cur.pos - origin, offset);
   }
   throw new ParseError(
     'cross-reference section shall begin with the keyword xref (§7.5.4) or be a cross-reference stream object (§7.5.8.1)',
     cur.pos,
   );
+}
+
+/**
+ * §7.5.8.4 (hybrid-reference files) — if a table's trailer carries XRefStm
+ * (Table 19), read that cross-reference stream and fold its entries in
+ * BEHIND the table's own: "if an entry is not found in any given standard
+ * cross-reference section, the search shall proceed to a cross-reference
+ * stream specified by the XRefStm entry before looking in the previous
+ * cross-reference section". So within the combined section the table
+ * entry wins, and the whole combined section shadows everything older —
+ * which is exactly how the hidden objects' free entries in the previous
+ * section get ignored ("shall ignore the free entry in the previous
+ * section"). The chain keeps following the TABLE trailer's Prev.
+ */
+async function foldXrefStm(
+  bytes: Uint8Array,
+  origin: number,
+  table: XrefSection,
+): Promise<XrefSection> {
+  const xrefStm = dictGet(table.trailer, 'XRefStm');
+  if (xrefStm === undefined) {
+    return table;
+  }
+  if (xrefStm.kind !== 'integer' || xrefStm.value < 0) {
+    throw new ParseError(
+      'XRefStm shall be an integer byte offset of a cross-reference stream (§7.5.8.4 Table 19)',
+      origin + table.offset,
+    );
+  }
+  const stream = await parseXrefStreamSection(bytes, origin, xrefStm.value, xrefStm.value);
+  const entries = new Map(table.entries);
+  for (const [num, entry] of stream.entries) {
+    if (!entries.has(num)) {
+      entries.set(num, entry);
+    }
+  }
+  return {
+    offset: table.offset,
+    kind: 'hybrid',
+    entries,
+    trailer: table.trailer,
+    selfObjectNumber: stream.selfObjectNumber,
+  };
 }
 
 const XREF_KEYWORD = [0x78, 0x72, 0x65, 0x66]; // xref
@@ -496,7 +599,12 @@ const XREF_KEYWORD = [0x78, 0x72, 0x65, 0x66]; // xref
  * Raw-byte reading is deliberate: comments are not permitted here, and
  * the entry format is fixed, so the token layer must not be involved.
  */
-function parseXrefSection(bytes: Uint8Array, origin: number, offset: number): XrefSection {
+function parseXrefSection(
+  bytes: Uint8Array,
+  origin: number,
+  offset: number,
+  addressedAt: number,
+): XrefSection {
   const cur = new ByteCursor(bytes, origin + offset);
 
   if (cur.matches(XREF_KEYWORD)) {
@@ -554,7 +662,7 @@ function parseXrefSection(bytes: Uint8Array, origin: number, offset: number): Xr
   // generation to 0 (§7.5.8.2 Table 17 W; §7.5.8.3 Table 18 "Default
   // value: 0"), which veraPDF-corpus writes as /W [1 2 0] in 493 of 2907
   // specimens.
-  return { entries, trailer };
+  return { offset: addressedAt, kind: 'table', entries, trailer, selfObjectNumber: undefined };
 }
 
 /**

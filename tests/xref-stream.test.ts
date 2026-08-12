@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { dictGet } from '../src/cos/types.js';
-import { type PdfDocument, parsePdf } from '../src/index.js';
+import { type PdfDocument, parsePdf, readXrefChain, readXrefSectionAt } from '../src/index.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -238,5 +238,96 @@ describe('cross-reference streams (§7.5.8)', () => {
     b.add('\nendstream endobj\n');
     b.add(`startxref\n${head}\n%%EOF\n`);
     await expect(parsePdf(b.bytes())).rejects.toThrow(/W shall be an array of three/);
+  });
+});
+
+/**
+ * Hybrid-reference file (§7.5.8.4), the clause's EXAMPLE reduced: a main
+ * classic table (objects 0-1; the hidden objects would be free there), an
+ * empty update table whose trailer carries Prev + XRefStm, and the
+ * cross-reference stream (object 11) that reveals the hidden objects —
+ * object 3 lives in object stream 2.
+ */
+function buildHybrid(): {
+  bytes: Uint8Array;
+  mainOff: number;
+  updateOff: number;
+  xrefStmOff: number;
+} {
+  const pad = (n: number, w: number): string => n.toString().padStart(w, '0');
+  const W3 = [1, 2, 2] as const;
+  const b = new Builder();
+  b.add('%PDF-1.7\n');
+  const off1 = b.add('1 0 obj << /Type /Catalog /StructTreeRoot 3 0 R >> endobj\n');
+  const pairs = '3 0 ';
+  const stmData = `${pairs}<< /Type /StructTreeRoot >>`;
+  const off2 = b.add(
+    `2 0 obj << /Type /ObjStm /N 1 /First ${pairs.length} /Length ${stmData.length} >> stream\n${stmData}\nendstream endobj\n`,
+  );
+  const mainOff = b.add(
+    `xref\n0 2\n0000000000 65535 f \n${pad(off1, 10)} 00000 n \ntrailer\n<< /Size 12 /Root 1 0 R >>\n`,
+  );
+  const xrefStmOff = b.length;
+  const rows = [
+    entry(W3, [1, off2, 0]), //       obj 2: the object stream
+    entry(W3, [2, 2, 0]), //          obj 3: hidden, in objstm 2 at index 0
+    entry(W3, [1, xrefStmOff, 0]), // obj 11: the cross-reference stream itself
+  ];
+  const dataLen = rows.reduce((a, r) => a + r.length, 0);
+  const data = new Uint8Array(dataLen);
+  let p = 0;
+  for (const r of rows) {
+    data.set(r, p);
+    p += r.length;
+  }
+  b.add(
+    `11 0 obj << /Type /XRef /Size 12 /Index [2 1 3 1 11 1] /W [1 2 2] /Length ${dataLen} >> stream\n`,
+  );
+  b.add(data);
+  b.add('\nendstream endobj\n');
+  const updateOff = b.add(
+    `xref\n0 0\ntrailer\n<< /Size 12 /Root 1 0 R /Prev ${mainOff} /XRefStm ${xrefStmOff} >>\n`,
+  );
+  b.add(`startxref\n${updateOff}\n%%EOF\n`);
+  return { bytes: b.bytes(), mainOff, updateOff, xrefStmOff };
+}
+
+describe('hybrid-reference files (§7.5.8.4)', () => {
+  it('resolves a hidden object via XRefStm: section → XRefStm → Prev search order', async () => {
+    const doc = await parsePdf(buildHybrid().bytes);
+    // The XRefStm reveals object 3 as compressed; without it the object is
+    // simply absent (the reduced main table never mentions it) and would
+    // read as null (R-7.3.10-13).
+    expect(doc.xref.get(3)).toEqual({
+      type: 'compressed',
+      streamObjectNumber: 2,
+      indexInStream: 0,
+    });
+    const structTreeRoot = await doc.getObject(3, 0);
+    expect(structTreeRoot.kind).toBe('dict');
+    if (structTreeRoot.kind !== 'dict') return;
+    expect(dictGet(structTreeRoot, 'Type')).toEqual({ kind: 'name', value: 'StructTreeRoot' });
+  });
+
+  it('keeps the revisions apart in readXrefChain: hybrid section carries the folded entries and its stream object number', async () => {
+    const { bytes, mainOff, updateOff } = buildHybrid();
+    const chain = await readXrefChain(bytes);
+    expect(chain.headerVersion).toBe('1.7');
+    expect(chain.startxref).toBe(updateOff);
+    expect(chain.sections.map((s) => s.kind)).toEqual(['hybrid', 'table']);
+    const [update, main] = chain.sections;
+    expect(update?.offset).toBe(updateOff);
+    expect(update?.selfObjectNumber).toBe(11);
+    expect([...(update?.entries.keys() ?? [])].sort((a, b2) => a - b2)).toEqual([2, 3, 11]);
+    expect(main?.offset).toBe(mainOff);
+    expect(main?.selfObjectNumber).toBeUndefined();
+    expect(main?.entries.size).toBe(2);
+  });
+
+  it('reads a single addressed section via readXrefSectionAt', async () => {
+    const { bytes, mainOff } = buildHybrid();
+    const section = await readXrefSectionAt(bytes, mainOff);
+    expect(section.kind).toBe('table');
+    expect(section.entries.size).toBe(2);
   });
 });

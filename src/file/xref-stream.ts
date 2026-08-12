@@ -23,11 +23,17 @@ import { ParseError, parseIndirectObject } from '../syntax/object-parser.js';
 import { TokenReader } from '../syntax/token-reader.js';
 import type { XrefEntry, XrefSection } from './file-parser.js';
 
-/** Parse the cross-reference stream located at `origin + offset`. */
+/**
+ * Parse the cross-reference stream located at `origin + offset`.
+ * `addressedAt` is the offset the startxref/Prev/XRefStm carried — it is
+ * recorded on the section as its identity (it may differ from `offset`
+ * when the caller has skipped leading white-space).
+ */
 export async function parseXrefStreamSection(
   bytes: Uint8Array,
   origin: number,
   offset: number,
+  addressedAt: number,
 ): Promise<XrefSection> {
   const cur = new ByteCursor(bytes);
   cur.seek(origin + offset);
@@ -90,7 +96,15 @@ export async function parseXrefStreamSection(
     }
   }
 
-  return { entries, trailer: dict };
+  return {
+    offset: addressedAt,
+    kind: 'stream',
+    entries,
+    trailer: dict,
+    // §7.5.8.3: an entry for the stream itself exists (usually in itself) —
+    // its own object number identifies it to per-revision consumers.
+    selfObjectNumber: parsed.objectNumber,
+  };
 }
 
 function makeEntry(type: number, second: number, third: number): XrefEntry {

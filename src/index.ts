@@ -18,6 +18,7 @@ export type {
 } from './cos/types.js';
 export { COS_FALSE, COS_NULL, COS_TRUE, dictGet, dictGetRaw } from './cos/types.js';
 export type {
+  XrefChain,
   XrefCompressed,
   XrefEntry,
   XrefFree,
@@ -25,7 +26,7 @@ export type {
   XrefSection,
   XrefUnknown,
 } from './file/file-parser.js';
-export { PdfDocument, parsePdf } from './file/file-parser.js';
+export { PdfDocument, parsePdf, readXrefChain, readXrefSectionAt } from './file/file-parser.js';
 export type { ParsedObjectStream } from './file/object-stream.js';
 export { loadObjectStream, objectFromStream } from './file/object-stream.js';
 export { type DecodeOptions, decodeStream } from './filter/decode.js';
