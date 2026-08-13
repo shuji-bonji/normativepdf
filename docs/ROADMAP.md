@@ -147,7 +147,23 @@ flowchart LR
         **T-3 = 文脈検査を外すと 6 件落ちる**
   - ⚠️ **サイズはオラクルが見ていない面**（ダイジェストが圧縮を正規化して落とすため）。生成パスを建て直したら
         `uc-oracle` にサイズの帯を足すこと
-- [ ] フォント辞書（W-2 = サブセット結果と辞書型の整合を構造的に解く）
+- [x] **フォント辞書（2026-08-14）** — `src/font/embedded-font.ts`。**辞書をバイト列から導く**ことで
+      W-2 を表現不能にした: `sniffFontProgram` が sfnt/CFF ヘッダを読んで**実際に何であるか**を決め、
+      `buildType0Font` が Table 124 の対応（glyf → `CIDFontType2` + `FontFile2` + `Length1` /
+      OTTO の `CFF ` → `CIDFontType0` + `FontFile3 /OpenType` / 素の CFF → `/CIDFontType0C`）を
+      **唯一の経路として**書く。呼び側は CIDFont の subtype を名乗らないので名乗り間違えられない。
+      併せて条文で縛ったもの = 必須テーブル欠落は拒否（R-9.9.1-34）/ `CIDToGIDMap` は Type2 のみ
+      （R-9.7.4.2-7）/ CFF に `Length1` を書かない（R-9.9.1-12）/ サブセット名は
+      **大文字 6 + `+`**（R-9.9.2-2/-3。タグはバイト列から決定論的に導く）/ 記述子が `FontFile*` を
+      自分で名乗るのを拒否 / フォントコレクション（`ttcf`）は拒否
+  - **実測 12/12**（**実物のフォントで**: NotoSansJP `.otf` / Liberation Sans `.ttf` /
+        **writer が harfbuzz で実際に作ったサブセット**）。**T-3 = W-2 を再現すると 2 件・
+        cmap の報告を消すと 2 件落ちる**。`tests/embedded-font.test.ts` は 22 ケース
+  - 🔴 **この過程で writer の実欠陥を 1 件見つけた（B-23 に起票）** = サブセット済み TrueType が
+        `cmap` を積んでいる。**R-9.9.1-21 は shall not**（CIDFont で使うなら載せてはならない）。
+        **veraPDF はフォントプログラムの中を見ないので 146/146 のまま通る = W-2 と同じ盲点**。
+        テーブル削除は sfnt の組み直しでサブセッタの仕事なので、ライブラリ側は
+        **拒まずに `notes` で報告する**（直せないものを拒んでも、実在する入力を弾くだけになる）
 - [ ] 構造木・タグ・MarkInfo（PDF/UA-1 系）
 - [ ] XMP・OutputIntent・catalog（適合宣言は要件検査と同関数に = DESIGN §3）
 - [ ] **受入: pdf-lib 撤去 + UC 回帰全緑 + PDF/A-3b COMPLIANT**

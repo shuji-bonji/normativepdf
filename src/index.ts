@@ -40,6 +40,19 @@ export {
   DEFAULT_PREDICTOR_PARMS,
   type PredictorParms,
 } from './filter/predictor.js';
+export type {
+  FontObjectSink,
+  FontProgram,
+  FontProgramFormat,
+  Type0FontSpec,
+} from './font/embedded-font.js';
+export {
+  buildType0Font,
+  FontProgramError,
+  fontFileEntry,
+  sniffFontProgram,
+  subsetTag,
+} from './font/embedded-font.js';
 export type { WritableObject, WriteFileOptions } from './serialize/file-writer.js';
 export { collectObjects, rewrite, writeFile } from './serialize/file-writer.js';
 export type {
