@@ -3,7 +3,12 @@
 > **進捗の正典はこのファイル。** チェックボックスの更新のみで進捗を表す（詳細は各正典文書へ）。
 > 設計の中身は [`DESIGN.md`](DESIGN.md)、公開面は [`PUBLISHING.md`](PUBLISHING.md)、規律は [`GUARDS.md`](GUARDS.md)。
 >
-> 現在地: **Phase 2（段階 1・シリアライザ）** — 2026-08-13 着手。Phase 1 は受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+> 現在地: **Phase 3（段階 2・pdf-lib 撤去）に着手 — まず受入の計器を立てた**（2026-08-13・ADR-0006 + `pdf-writer-mcp/scripts/uc-oracle/`。旧実装のゴールデンは撤去したら二度と採れないので先に採取した）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+>
+> **次に着手するものは [`handoff/`](handoff/) に 1 件 1 枚で置いてある**（別セッションが 1 枚読めば始められる形）:
+> [Phase 3 = pdf-lib 撤去](handoff/phase3-pdflib-removal.md) ／
+> [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
+> [自前 inflate（着手条件は未成立）](handoff/own-inflate.md)
 
 ```mermaid
 flowchart LR
@@ -55,14 +60,14 @@ flowchart LR
 - [x] **受入: veraPDF-corpus 2881/2907（99.1%）・pass 検体は全件パース通過（2026-08-11・`npm run corpus:survey` = pass 検体の失敗のみ exit 1 の門番）**。落ちる 26 件は全て fail 検体 = 意図的破損 23（うち 3 は catalog /Version `/2,0` の 6.1.12 検体 = 下記の格上げ実装が正しく拒否）+ 暗号化 2 + Isartor の壊れ xref エントリ 1。hybrid XRefStm の要求は立たず（§7.5.8.4: 非対応リーダーは古典テーブル側を読む、で全検体通過）
 - [x] catalog /Version による版の格上げ（2026-08-11）: §7.7.2 Table 29「ヘッダより後の版なら格上げ・ヘッダが後ならヘッダが正・値は name であること」を parsePdf に実装（`headerVersion` = 観測 / `version` = 実効、の 2 面持ち）。incremental save 検体が v2.0 と報告されるようになり既知の残が解消。非 name / 形式外は Table 29 引用の strict エラー（veraPDF-corpus の 6.1.12 fail 検体 3 件が実測根拠）
 - [x] hybrid XRefStm（§7.5.8.4）+ per-section 公開 API（2026-08-11）: **要求はコーパスでなく最初の消費者から立った** — verify の revision-diff は「マージしないセクション列」と hybrid 読みを自前実装しており（890 行）、その置き換えに必要な形を API にした。`XrefSection` に offset/kind('table'|'stream'|'hybrid')/selfObjectNumber を追加・`readXrefChain`（newest first・strict）・`readXrefSectionAt`（回復方針は消費者側に残す = 単一セクション読み）。hybrid の探索順は条文どおり「セクション → XRefStm → Prev」（テーブル勝ち・stream の Prev は無視 = Table 17）。§7.5.8.4 EXAMPLE 縮約のフィクスチャで隠しオブジェクト解決を実測・門番 2 種緑維持 → **0.2.0**
-- [x] **verify から使わせる（第 1 消費者・2026-08-13）**: `revision-diff.ts` の歩行層（古典テーブル / xref ストリーム / hybrid XRefStm / PNG predictor / inflate = 自前 366 行）を `readXrefSectionAt` に置換。890 → 713 行。回復方針は verify 側に温存（古い startxref への後退・MAX_REVISIONS・巡回検出・linearized の嘘対策）＝ `readXrefSectionAt` の doc コメントが宣言した役割分担がそのまま成立した。`parsePdf`/`getObject` の async 化が `diffRevisions` → `analyzeIntegrity` まで波及。**A/B 実測 = リポジトリ内 PDF 2987 件で旧実装と出力比較 → 2973 件同一・差 14 件**（内訳は下記）
-  - **獲得 1 件**: `PDF 2.0 with offset start.pdf`（§7.5.2 の origin > 0）— 旧実装は null、新実装は歩けた。オフセット原点を条文どおり扱った効果
-  - **獲得 1 件**: `dss-pades-5sigs-doctimestamp.pdf` — trailer が `/Prev 0` を持つ 8 リビジョンの 5 署名検体。旧実装は `0` を「Prev なし」として飲み込み `truncated: false`（＝完全に歩けた）と報告していた。**署名 5 本の文書について「古いリビジョンは無い」と断言していた**ことになる。新実装は追えない `/Prev` を truncated として報告 → DocMDP は `indeterminate` になる（[[revision-diff-lies-linearized-and-full-save]] の 3 例目）
-  - **後退 9 件（全て veraPDF-corpus の fail 検体 = 意図的破損の xref）**: §7.5.4 の厳格さで normativepdf が拒否 → 「歩けた」から「判定不能」へ落ちる。理由の内訳 = subsection ヘッダの空白 2 個 (3)・`xref` が行独立でない (3)・エントリが 19 バイト（`f\n`）(1)・xref でも xref ストリームでもない (1)・オブジェクト番号が非正 (1)。**落ちる向きは常に indeterminate 側で、誤った pass は生まない**が、19 バイトエントリは実世界の緩いプロデューサにも出る形なので、実の壊れ検体で要求が立ったら回復方針として verify 側に足す（library は strict のまま）
+- [x] **verify から使わせる（第 1 消費者・2026-08-13）**: `revision-diff.ts` の歩行層（古典テーブル / xref ストリーム / hybrid XRefStm / PNG predictor / inflate = 自前 366 行）を `readXrefSectionAt` に置換。890 → 713 行。回復方針は verify 側に温存（古い startxref への後退・MAX_REVISIONS・巡回検出・linearized の嘘対策）＝ `readXrefSectionAt` の doc コメントが宣言した役割分担がそのまま成立した。`parsePdf`/`getObject` の async 化が `diffRevisions` → `analyzeIntegrity` まで波及。**A/B 実測 = リポジトリ内 PDF 2987 件で旧実装と出力比較 → 2974 件同一・差 13 件**（内訳は下記。**当初 2973 件同一・差 14 件・後退 9 件と記録したが誤り**。verify CHANGELOG `[0.15.0]` の 4 + 3 + 6 = 13 が正）
+  - **歩けるようになった 4 件のうち 1 件**: `PDF 2.0 with offset start.pdf`（§7.5.2 の origin > 0）— 旧実装は null、新実装は歩けた。オフセット原点を条文どおり扱った効果
+  - **打ち切りとして報告するようになった 3 件のうち 1 件**: `dss-pades-5sigs-doctimestamp.pdf` — trailer が `/Prev 0` を持つ 8 リビジョンの 5 署名検体。旧実装は `0` を「Prev なし」として飲み込み `truncated: false`（＝完全に歩けた）と報告していた。**署名 5 本の文書について「古いリビジョンは無い」と断言していた**ことになる。新実装は追えない `/Prev` を truncated として報告 → DocMDP は `indeterminate` になる（[[revision-diff-lies-linearized-and-full-save]] の 3 例目）
+  - **後退 6 件（全て veraPDF-corpus の fail 検体 = 意図的破損の xref）**: §7.5.4 の厳格さで normativepdf が拒否 → 「歩けた」から「判定不能」へ落ちる。理由の内訳 = `xref` が行独立でない (3)・subsection ヘッダのエントリ数が数値でない (1)・エントリが 19 バイト（`f\n`）(1)・xref でも xref ストリームでもない (1)。**落ちる向きは常に indeterminate 側で、誤った pass は生まない**が、19 バイトエントリは実世界の緩いプロデューサにも出る形なので、実の壊れ検体で要求が立ったら回復方針として verify 側に足す（library は strict のまま）
 - [ ] reader から使わせる（第 2 消費者）— **版数報告だけの部分移行は取り下げた（2026-08-13）**。reader の版数経路は pdf-lib 依存であり、1 フィールドのために normativepdf でもう一度フルパースして strict throw を pdf-lib で受けるフォールバック二重構造になる。版数は面が小さく API 適合性の計器としても割に合わない（[[saturated-faces-cannot-carry-a-difference]]）。**Phase 3 の pdf-lib 撤去と一括で移行する**
 - [x] SKILL.md の TODO を実測で埋める（2026-08-11: コマンド表 = sandbox/ホストの区別・コーパス門番 2 種の合格基準・頻出条項索引 9 件。pdf-lib オラクル / 独立実装読み戻しは段階 1〜2 の TODO として残置）
 
-## Phase 2: 段階 1 — シリアライザ・増分更新 🚧
+## Phase 2: 段階 1 — シリアライザ・増分更新 ✅（受入充足・2026-08-13）
 
 **受入: 署名付き検体で verify が VALID を維持**
 
@@ -79,7 +84,7 @@ flowchart LR
 - [x] **受入到達: 実署名検体で `verify_signatures` VALID 維持（2026-08-13）** — `selfmade-pades-lta.pdf`（CAdES 署名 + DocTimeStamp）に増分更新を掛け、pdf-verify-mcp で**署名 2 本とも VALID・digest 一致を維持**（差は `Bytes after signed range` が +346 のみ）。`dss-pades-lta.pdf`（4.2MB・DSS 付き）でも同様で、verify の revision-diff が追記したリビジョンを「obj 26 0: added — annotation (Text)」と正しく読んだ。4 検体（署名 2 + pdf20examples 2、うち 1 つは origin > 0）で 3 段すべて緑・qpdf も新しい苦情を出さない
   - **T-3 実測 5 通り**: origin を引かない = origin>0 のテストが落ちる / subsection をまとめる = 分割のテストが落ちる / `/Prev` を書かない = チェーンが伸びない / `/XRefStm` を残す = 検知 / **元バイト列を 1 バイト書き換える = 3 件落ちる**（モジュール自身の guard も発火）
   - 測っていないこと = **PDF/A 適合の維持**（元が xref ストリームのファイルに古典テーブルを追記する形になるため。xref ストリームの書きが入ってから測る。ADR-0005「測らないと決めたこと」）
-- [ ] **writer の増分パスのみ移行 — 読み側だけに範囲を絞った（2026-08-13 判断）**。writer の `incremental.ts`（514 行）は pdf-lib のオブジェクトを `sizeInBytes`/`copyBytesInto` で直列化しており（「自前トークナイザを持たない」と冒頭に明記）、`appendUpdate` に寄せるには **pdf-lib → COS の変換層**が要る。それは Phase 3 で pdf-lib が消えたら丸ごと不要になるものなので作らない。また 514 行は構造だけでなく `/ID` の更新（§14.4）・DocMDP 判定・dirty 参照追跡という writer の方針を含み、移行後も残る。**置換するのは手書きパース 3 関数**（`readStartXref` / `detectXrefStyle` / `parsePreviousTrailer`）で、`readXrefChain` が `{ origin, startxref, sections[0].kind, sections[0].trailer }` を 1 回で返す
+- [x] **writer の増分パスのみ移行 — 読み側だけに範囲を絞った（2026-08-13 判断・同日 writer 0.19.0 で完了）**。writer の `incremental.ts`（当時 514 行・B-22 是正後 587 行）は pdf-lib のオブジェクトを `sizeInBytes`/`copyBytesInto` で直列化しており（「自前トークナイザを持たない」と冒頭に明記）、`appendUpdate` に寄せるには **pdf-lib → COS の変換層**が要る。それは Phase 3 で pdf-lib が消えたら丸ごと不要になるものなので作らない。またその大半は構造だけでなく `/ID` の更新（§14.4）・DocMDP 判定・dirty 参照追跡という writer の方針を含み、移行後も残る。**実際に消えたのは手書きの `readStartXref` / `detectXrefStyle` と `/Size` 正規表現**（`parsePreviousTrailer` は `origin` 引数が 1 つ増えた形で残っている。起票時に挙げた「3 関数」とは中身が違う）。**当初は `readXrefChain` で置く計画だったが `readXrefSectionAt` に変えた** — チェーン全体を strict に歩くと、追記に必要な直前セクション 1 つは読めるのに古いリビジョンの破損で拒否してしまい、2987 件中 17 件（実署名 5 本の `dss-pades-5sigs-doctimestamp.pdf` を含む）が書けなくなった。セクション 1 つだけ読む形にして拒否を 17 → 10 件に減らした（移行前の緩いパースなら 0 件。10 件は strict 化と引き換えの残りで、CHANGELOG に Known regressions として記録済み）
   - 🔴 **調査中に writer の実欠陥を 1 件見つけた（writer B-22 に起票）**: origin > 0 のファイルで `startxref` を絶対位置として扱っており、`PDF 2.0 with offset start.pdf`（origin = 656）で xref 形式を `table` → `stream` と誤判定し、**追記後のファイルに qpdf が "file is damaged"** と言う。verify の revision-diff で踏んだのと同じ型。既存テストが全部 origin = 0 で書かれていて、この面を一度も測っていなかった
   - **前提 = normativepdf 0.3.0 の公開**（未公開の書き側 API に依存するため）
 
@@ -102,11 +107,33 @@ flowchart LR
 
 **受入: pdf-lib 完全撤去・PDF/A-3b COMPLIANT 維持・リリースごと veraPDF レポート開始**
 
+- [x] **受入基準を先に決めた = [ADR-0006](adr/0006-phase3-differential-acceptance.md)（2026-08-13）**:
+      バイト一致は成立しないので**意味的構造ダイジェストで A/B** する。読み手は qpdf に限る（family 内のパーサは
+      撤去後に全部 normativepdf の上に乗るのでオラクルになれない = T-2）。受入は 4 面（構造 / ツール応答 /
+      qpdf --check / veraPDF）。`compare_structure` は**使えないことを実測して除外**（11 プロパティのうち 4 つは
+      直列化が変われば必ず differ・構造木もフォント辞書型も演算子も見ていない）
+- [x] **ゴールデン採取（2026-08-13・`pdf-writer-mcp/scripts/uc-oracle/`）** — 旧実装は撤去したら二度と作れないので
+      着手前に固定した。軸で並べた検体 24 本中 23 本を採取・2 回続けて差 0・**T-3 を 3 面で実測**
+      （演算子の色 / `CIDFontType0`→`2` / 警告文）。**pdf-lib がまだ在るうちに AcroForm 入力検体も凍結**
+      （テストは検体を pdf-lib で組み立てており、撤去すると検体を作る手段ごと消える）
+  - 🔴 **T-3 が最初に発火せず、計器の欠陥を 1 件見つけた** — ページ参照を全部 `{"@page": i}` に畳んでいて、
+        **ページの中身がダイジェストに 1 バイトも入っていなかった**。計器も T-3 を通すまで信用しない
+  - **ホスト実走で 4 面とも判定済み（2026-08-13・qpdf 12.4.0 + veraPDF）** = `pdfa-3b` **146/146** /
+        `pdfa-4f` **109/109** / `pdfua-1` **106/106**（2 本）/ 素の `pdfa-4` は **108/109 で NOT COMPLIANT**
+        （`6.9-3` = 落ちることが正しい検体）/ 署名 2-2・6-5。
+        **`docs/TASKS.md` の散文にしか無かった数字が、再現手順つきでファイルに固定された**
+  - 🔴 **ホスト初走で 1 件出たが writer の後退ではなかった** — qpdf **12.4.0** が 5 署名検体の追記出力を
+        `unable to find page tree` で拒否（qpdf 10.6.3 は読めていた）。**入力の時点で** page tree ノードに
+        `/Type /Page` が無く obj 56 が null で、qpdf 10 は override・12 は拒む。
+        → **面ごとに測る形へ**（構造だけ `unreadable`・署名と応答と `--check` は残す）+
+        **入力も同じ読み手に通して `inputReadable` を記録**（帰属を記憶でなく記録で決める）+
+        **読み手の版が違えば警告**
+  - **空席 = TrueType 埋め込みの軸**（`.ttf` が手元に 0 件）。W-2 はこの軸の欠落で生き延びた欠陥なので、
+        「フォント辞書型が正しく分岐する」ことは現在測れていない
 - [ ] フィルタ・コンテンツストリームビルダ
 - [ ] フォント辞書（W-2 = サブセット結果と辞書型の整合を構造的に解く）
 - [ ] 構造木・タグ・MarkInfo（PDF/UA-1 系）
 - [ ] XMP・OutputIntent・catalog（適合宣言は要件検査と同関数に = DESIGN §3）
-- [ ] pdf-lib 差分オラクル運用（compare_structure）
 - [ ] **受入: pdf-lib 撤去 + UC 回帰全緑 + PDF/A-3b COMPLIANT**
 - [ ] PDF family へ取り込み（writer が第一利用者・自身でコントリビュート）
 

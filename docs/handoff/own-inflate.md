@@ -1,0 +1,102 @@
+# 引き継ぎ: 自前 inflate（純 TS）への置き換え — ADR-0003
+
+- 対象リポジトリ: `normativepdf`（この文書のある repo）
+- 根拠: [`../adr/0003-filter-strategy.md`](../adr/0003-filter-strategy.md)
+- **⚠️ 着手条件はまだ満たされていない。** 最初にやるのは実装ではなく**トリガー判定**である
+- この文書だけで着手できる。他の引き継ぎを読む必要は無い
+
+---
+
+## 0. まずトリガーを判定する（これを飛ばさない）
+
+ADR-0003 は着手条件を「詰まったから」ではない形で 3 つ置いた。**いずれか最初に来たものが引き金**である。
+
+| # | トリガー | 2026-08-13 時点の状態 |
+|---|---|---|
+| 1 | 回復パースが**破損ストリームの部分回収**を要求した | ❌ 来ていない |
+| 2 | **書き側で deflate（圧縮出力）が必要**になった | ❌ 来ていない（書きは無圧縮。`/Filter` 省略は合法） |
+| 3 | 上記が来ないまま**段階 2（Phase 3 = pdf-lib 撤去）が完了**した | ❌ Phase 3 未着手 |
+
+⚠️ **2 と 3 の順序に注意。** Phase 3 の第 1 項目は「フィルタ・コンテンツストリームビルダ」なので、
+**Phase 3 の途中でトリガー 2 が先に立つ公算が高い**。3 番（Phase 3 完了）を待つのは誤りで、
+圧縮出力を書くと決めた時点がその瞬間である。
+
+**3 つとも立っていないなら、この作業は今やることではない。** 上の表を実測で更新してから
+判断すること。特に 2 は「オブジェクトストリームを圧縮したい」という要求が来た瞬間に立つ。
+
+判定の実測方法:
+
+- 1 → `git log` と Issue に「破損 deflate から部分回収したい」という要求があるか
+- 2 → `src/serialize/` に圧縮を書く要求が入っているか。`writeFile` の出力サイズが
+      問題になった記録があるか
+- 3 → [`../ROADMAP.md`](../ROADMAP.md) の Phase 3 が完了しているか
+
+## 1. 今そこにあるもの
+
+`src/filter/inflate.ts` は **24 行**で、中身は WHATWG `DecompressionStream('deflate')` の
+ラッパである。ファイル冒頭に自分でこう書いてある。
+
+```
+⚠️ INTERIM IMPLEMENTATION (ADR-0003). The canonical implementation is a
+pure-TS inflate written against RFC 1950/1951; this wrapper temporarily
+occupies the same seat behind the filter boundary and must not leak
+outside `src/filter/`.
+```
+
+**境界はすでに切ってある**（ADR-0003 決定 2）。`decode.ts`（134 行）の背後にあり、
+`inflate` を差し替えるだけで置き換わる設計になっている。PNG Predictor（§7.4.4.4）の
+逆適用は `predictor.ts`（165 行）に**すでに自前で**あり、この作業の範囲外である。
+
+## 2. なぜ自前が「正」なのか（ADR-0003 の理由を再掲）
+
+- **条文駆動の一貫性。** RFC 1950/1951 は `ietf` MCP で原文が引ける。
+  「すべての挙動を規範文書に紐づける」というこのライブラリの中核原則を、
+  フィルタ層でも成立させられる。native はブラックボックスで紐づけられない
+- **査読可能性**（ADR-0001 と同じ根拠）
+- **回復パースの制御。** 破損 deflate からの部分回収・エラー位置の特定は、
+  native では chunk 粒度が限界
+- **書き側との対称性。** 決定論的 deflate はどのみち自前になる
+
+## 3. やること
+
+- [ ] RFC 1950（zlib）と RFC 1951（DEFLATE）を `ietf` MCP で引きながら書く。
+      **条文番号をコメントに残す**（このライブラリの全挙動がそうなっている）
+- [ ] `src/filter/inflate.ts` を純 TS 実装に置き換える
+- [ ] **native を消さない。** `src/filter/inflate-native.ts` 等に移し、
+      **差分オラクルとして test に残す**（ADR-0003 決定 5・GUARDS G-6）
+- [ ] 公開 API は **async を維持する**（ADR-0003 決定 3）。同期版が可能になっても、
+      互換性のため既存 API の形は変えない。sync 版は非破壊追加として別途検討
+
+## 4. 受入
+
+**2 つとも要る。片方では足りない。**
+
+1. **差分検査**: 同一入力に対して自前と native の出力が**バイト一致**する。
+   コーパス全件で回す。**門番スクリプトは 2 本あり、役割が違う**:
+   `npm run corpus:survey`（パース = `baselineParsed`）と
+   `npm run roundtrip:survey`（往復 = `baselineRoundTrip`・`--qpdf` 込み）。
+   差分オラクルは inflate を通る経路すべてに掛けたいので **2 本とも回す**
+2. **コーパス門番が緑を維持**: `corpus.lock.json` が pin する 2,907 検体に対し
+   `baselineParsed` = 2,883 / `baselineRoundTrip` = 2,881 を**下回らない**。
+   門番は**上回った場合も落ちる**ので、良くなったなら lock を同じ commit で更新する
+
+> **改善で門番が落ちるのは仕様である。** 「良くなった」を無言で通すと、
+> 次の人がその数字を基準だと信じられなくなる。
+
+## 5. 触ってはいけないもの
+
+- **`predictor.ts`。** PNG Predictor は zlib の外側にある PDF 固有の前処理で、
+  最初から自前。inflate の置き換えとは無関係
+- **書き側に `CompressionStream` を持ち込まない**（ADR-0003 決定 4）。
+  圧縮出力はエンジン間で一意でなく、決定論的出力（DESIGN §4.1）と正面衝突する。
+  圧縮が要るなら**固定パラメータの自前 deflate**である
+- **`corpus.lock.json` の pin と実装変更を同じ commit に入れない**
+  （lock ファイル自身の `$comment` に書いてある規則）
+
+## 6. 参照
+
+- [`../adr/0003-filter-strategy.md`](../adr/0003-filter-strategy.md) — 決定と着手トリガーの正典
+- [`../adr/0001-language-choice.md`](../adr/0001-language-choice.md) — 査読可能性の原則
+- [`../DESIGN.md`](../DESIGN.md) §4.1 決定論的出力
+- [`../GUARDS.md`](../GUARDS.md) G-6 差分で採点する
+- [`../ROADMAP.md`](../ROADMAP.md) Phase 1 の残件行（自前 inflate はここに残置されている）
