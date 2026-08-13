@@ -102,11 +102,30 @@ writer のテストはフォーム検体を **pdf-lib で毎回組み立てて�
 → `scripts/uc-oracle/make-inputs.mjs` で 1 回だけ生成し、
 `scripts/uc-oracle/inputs/form-basic.pdf` としてバイト列で固定した。以後再生成しない。
 
-### 9. pdf-lib は「実行時依存 0」を受入とし、テストのオラクルとしては残してよい
+### 9. pdf-lib は「実行時依存 0」を受入とする。テストの pdf-lib は役割で分ける
 
-受入の文言を「`grep -rn "pdf-lib" src/` が 0 件・`dependencies` から消える」とする。
-`devDependencies` に残る pdf-lib は**旧実装を読み直す第 2 の目**であって、撤去の失敗ではない。
-最終的に落とすかは Phase 3 完了後に別途決める。
+受入の文言は「`grep -rn "from 'pdf-lib'" src/` が 0 件・`dependencies` から消える」。
+`devDependencies` に残る pdf-lib は撤去の失敗ではない。ただし「残してよい」で済ませると
+何が守られているのか分からなくなるので、**用途を実測して分けた**（2026-08-14）:
+
+| 用途 | ファイル数 | 撤去後の扱い |
+|---|---|---|
+| 検体をディスクに書いて writer に食わせる（入力の生産者） | **14** | **残す** — 他所が作った PDF を食う形が実態に近い |
+| 出力を読んで検査する（独立した読み手） | **5**（＋他ファイルにも混在） | **残す** — normativepdf と 1 行もコードを共有しない外の目（T-2） |
+| 凍結済みの検体ファイル | **0** | ← ここが問題 |
+
+**`tests/` に凍結された PDF は 1 つも無く、入力は毎回 pdf-lib が組み立てている。**
+つまり pdf-lib を完全に消すと、14 ファイルは**検査対象ではなく入力を失って**落ちる。
+これは「テストを直す」作業ではなく「測る対象が消える」事故なので、順序を決めておく:
+
+1. **実行時依存だけを 0 にする**（受入はここ）。`devDependencies` の pdf-lib は残す
+2. **欠陥クラスを 1 つ守っている入力は凍結する** — その検体が消えると、対応する欠陥の再発を
+   誰も見なくなるもの。既に凍結したのは AcroForm（`uc-oracle/inputs/form-basic.pdf`）。
+   同じ資格を持つのは origin > 0（B-22）とフォント種別（W-2）で、どちらも
+   `uc-oracle` 側に外部検体として置いてある
+3. **devDependencies からも落とすのは、同じ面を qpdf で覆えたとき**。今は覆えていない —
+   `uc-oracle` は成果物の粒度で測っており、`tests/` は writer 内部の分岐の粒度で突いている。
+   粒度が違うものを「どちらも緑だから片方でよい」と畳まない
 
 ## 測ってあること（2026-08-13・サンドボックス実走）
 
@@ -149,12 +168,13 @@ qpdf 12 が `unable to find page tree` で拒み、検体ごと `failed` にな�
 
 ## ゴールデンの中身（2026-08-13・ホスト実走・qpdf 12.4.0 + veraPDF）
 
-`uc-oracle.lock.json` = writer 0.19.0 / 測定 23・測れず 1・失敗 0（うち構造を読めなかった検体 1）。
-**適合の 4 面がすべて判定済みになった**:
+`uc-oracle.lock.json` = writer 0.19.0 / **測定 25・測れず 0・失敗 0**（うち構造を読めなかった検体 1。
+TrueType 検体 2 本を足した後の数字）。**適合の 4 面がすべて判定済みになった**:
 
 | 検体 | flavour | 判定 |
 |---|---|---|
 | `conformance-attach-pdfa3b` | `pdfa-3b` | COMPLIANT **146/146** |
+| `conformance-ttf-pdfa3b` | `pdfa-3b` | COMPLIANT **146/146**（TrueType 埋め込み側） |
 | `conformance-attach-pdfa4f` | `pdfa-4f` | COMPLIANT **109/109** |
 | `conformance-attach-pdfa4-bare` | `pdfa-4` | **NOT COMPLIANT 108/109**（`ISO 19005-4:2020 6.9-3`）= **落ちることが正しい検体** |
 | `conformance-ensure-tagged-ua1` / `conformance-tagged-ua1` | `pdfua-1` | COMPLIANT **106/106**（2 本とも） |
@@ -164,11 +184,25 @@ qpdf 12 が `unable to find page tree` で拒み、検体ごと `failed` にな�
 `docs/TASKS.md` の散文に手で書かれていた 146/146 ・106/106 ・109/109 が、
 **再現手順つきでファイルに固定された**。判定は veraPDF のものであって「ISO 19005 準拠」ではない（T2）。
 
-## 測っていないこと（このコミット時点）
+## フォント種別の軸を開けた（2026-08-14・追記）
 
-- **TrueType 埋め込みの軸**。`.ttf` が手元に 1 本も無い（実測 0 件）。
-  W-2 はまさにこの軸の欠落で生き延びた欠陥なので、
-  **「フォント辞書型が正しく分岐する」ことは現在測れていない**。ライセンスの clean な TTF を 1 本置くこと
+当初「`.ttf` が手元に 1 本も無い」ため測れていなかった軸を埋めた。
+Liberation Sans（SIL OFL 1.1）を `scripts/uc-oracle/fonts/` に同梱し（出所と全文は同ディレクトリの
+`.LICENSE.txt`・公開パッケージには入らない）、検体を 2 本足した:
+`create-text-ttf-17-tagged` と `conformance-ttf-pdfa3b`。
+
+**分岐が本当に別であることを先に実測した**（同じ本文・同じ引数でフォントだけ差し替え）:
+
+| 入力 | 出る辞書 |
+|---|---|
+| `.otf`（CFF ベース） | `/Subtype /CIDFontType0` + `/FontFile3 /Subtype /OpenType` |
+| `.ttf`（glyf ベース） | `/Subtype /CIDFontType2` + `/FontFile2` |
+
+W-2 は **前者を後者の形で埋めていた** shall 違反（R-9.9.1-33/-34）である。
+片方しか検体が無ければ、分岐を取り違えても緑のままになる。適合の面も種別ごとに分けた —
+PDF/A のフォント規則は辞書型ごとに別経路なので、CFF 側の 146/146 は TrueType 側の保証にならない。
+
+## 測っていないこと（このコミット時点）
 - 暗号化 PDF（writer は復号しない）・画像 XObject を含む検体・複数ページ構造木の深い入れ子
 
 ## 結果として何が変わるか

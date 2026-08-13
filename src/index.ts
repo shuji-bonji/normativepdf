@@ -3,6 +3,8 @@
  * Stage 0 surface: COS object model + lexical layer.
  */
 
+export type { ContentContext } from './content/content-stream.js';
+export { ContentStreamBuilder, ContentStreamError } from './content/content-stream.js';
 export type {
   CosArray,
   CosBoolean,
@@ -30,6 +32,7 @@ export { PdfDocument, parsePdf, readXrefChain, readXrefSectionAt } from './file/
 export type { ParsedObjectStream } from './file/object-stream.js';
 export { loadObjectStream, objectFromStream } from './file/object-stream.js';
 export { type DecodeOptions, decodeStream } from './filter/decode.js';
+export { type EncodedStream, type EncodeFilter, encodeStream } from './filter/encode.js';
 export { FilterError } from './filter/error.js';
 export { inflate } from './filter/inflate.js';
 export {
