@@ -68,9 +68,11 @@ flowchart LR
 - [x] **ファイル層シリアライザ（2026-08-13）** — header（§7.5.2・バイナリコメント行つき）/ body / 古典 xref テーブル（20 バイト固定・§7.5.4）/ trailer（§7.5.5・`/Size` 再計算・`/Prev` 削除・xref ストリーム固有キーの除去）。**出力は 1 リビジョン・全オブジェクト非圧縮**
 - [x] **受入 1: コーパス往復 2879/2879**（`npm run roundtrip:survey`・`corpus.lock.json` の `baselineRoundTrip`）+ **qpdf が 2879/2879 で新しい苦情を出さない**。分母の外は「ファイルが読めない 18 / オブジェクトが読めない 6 / 測定不能（暗号化）4」で、**測れなかったものは緑に数えない**
 - [ ] xref ストリーム / オブジェクトストリームの**書き**（今は読むだけ・出力は古典テーブル）
-- [ ] 増分更新（字句規則の規格準拠 = GUARDS G-C）。**元のバイト列を 1 バイトも変えずに追記する**のが要件で、往復とは受入が別
+- [x] **増分更新（2026-08-13・§7.5.6）** — 受入基準は先に [ADR-0005](adr/0005-incremental-update-acceptance.md)（3 段: ①元バイト列の完全一致 ②チェーンが正しく読める ③他者が読み署名を検証できる）。`appendUpdate` / `appendUpdateTo` を実装。変更オブジェクトのみのセクション（非連続なので subsection に分割）・前 trailer の全エントリ引き継ぎ（`/Prev` は差し替え・`/XRefStm` は削除）・各 trailer に `%%EOF`・**オフセットは origin 相対**。元バイト列の不変は**モジュール自身が出力前に検査して投げる**（呼び出し側にはバイト比較以外の検知手段が無いため）
+- [x] **受入到達: 実署名検体で `verify_signatures` VALID 維持（2026-08-13）** — `selfmade-pades-lta.pdf`（CAdES 署名 + DocTimeStamp）に増分更新を掛け、pdf-verify-mcp で**署名 2 本とも VALID・digest 一致を維持**（差は `Bytes after signed range` が +346 のみ）。`dss-pades-lta.pdf`（4.2MB・DSS 付き）でも同様で、verify の revision-diff が追記したリビジョンを「obj 26 0: added — annotation (Text)」と正しく読んだ。4 検体（署名 2 + pdf20examples 2、うち 1 つは origin > 0）で 3 段すべて緑・qpdf も新しい苦情を出さない
+  - **T-3 実測 5 通り**: origin を引かない = origin>0 のテストが落ちる / subsection をまとめる = 分割のテストが落ちる / `/Prev` を書かない = チェーンが伸びない / `/XRefStm` を残す = 検知 / **元バイト列を 1 バイト書き換える = 3 件落ちる**（モジュール自身の guard も発火）
+  - 測っていないこと = **PDF/A 適合の維持**（元が xref ストリームのファイルに古典テーブルを追記する形になるため。xref ストリームの書きが入ってから測る。ADR-0005「測らないと決めたこと」）
 - [ ] writer の増分パスのみ移行
-- [ ] **受入: 実署名検体で verify_signatures VALID 維持**
 
 ### 段階 1 で実測した「門番が本当に落ちるか」（T-3）
 

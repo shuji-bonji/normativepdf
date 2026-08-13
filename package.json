@@ -44,6 +44,7 @@
     "corpus:parse": "npm run build && node scripts/parse-corpus.mjs",
     "corpus:survey": "npm run build && node scripts/parse-corpus.mjs --survey corpus/veraPDF-corpus",
     "check": "biome check src tests",
+    "check:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "roundtrip": "npm run build && node scripts/roundtrip-corpus.mjs --qpdf",
     "roundtrip:survey": "npm run build && node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf"

@@ -37,6 +37,12 @@ export {
   DEFAULT_PREDICTOR_PARMS,
   type PredictorParms,
 } from './filter/predictor.js';
+export type {
+  AppendUpdateInput,
+  AppendUpdateResult,
+  DeletedObject,
+} from './serialize/incremental.js';
+export { appendUpdate, appendUpdateTo } from './serialize/incremental.js';
 export type { WritableObject, WriteFileOptions } from './serialize/file-writer.js';
 export { collectObjects, rewrite, writeFile } from './serialize/file-writer.js';
 export { ByteWriter, writeIndirectObject, writeObject } from './serialize/object-writer.js';
