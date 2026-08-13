@@ -25,11 +25,45 @@
  * (requires `npm run build` first)
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { parsePdf } from '../dist/index.js';
 
 const root = join(import.meta.dirname, '..');
+const lock = JSON.parse(readFileSync(join(root, 'corpus.lock.json'), 'utf8'));
+
+/**
+ * Refuse to act as a gate on an unidentified corpus.
+ *
+ * The pass rate only means something as a claim about a known set of files. If
+ * the corpus on disk is not the one the lock describes, a drop cannot be
+ * attributed: it could be this parser, or it could be that upstream added
+ * twelve deliberately broken specimens overnight. Reporting a number anyway
+ * would be reporting a measurement whose instrument is unknown, so this exits
+ * non-zero instead — the same discipline as "a missing corpus is a failure,
+ * not a skip".
+ */
+function assertPinnedCorpus() {
+  const { commit } = lock.veraPDFCorpus;
+  const shaFile = join(root, 'corpus', '.veraPDF-corpus.sha');
+  if (!existsSync(shaFile)) {
+    console.error(
+      'NG  corpus/.veraPDF-corpus.sha is missing — the corpus on disk cannot be identified.\n' +
+        '    Run: node scripts/fetch-corpus.mjs (it pins to corpus.lock.json)',
+    );
+    process.exit(1);
+  }
+  const present = readFileSync(shaFile, 'utf8').trim();
+  if (present !== commit) {
+    console.error(
+      `NG  corpus is at ${present.slice(0, 12)} but corpus.lock.json pins ${commit.slice(0, 12)}.\n` +
+        '    A rate measured against a different corpus is not comparable to the baseline.\n' +
+        '    Run: node scripts/fetch-corpus.mjs',
+    );
+    process.exit(1);
+  }
+}
 
 async function* walkPdfs(dir) {
   let entries;
@@ -85,6 +119,7 @@ if (surveyIndex !== -1) {
     console.error('NG  --survey requires a directory argument');
     process.exit(1);
   }
+  assertPinnedCorpus();
   const dir = join(root, target);
   let ok = 0;
   const failures = new Map(); // normalized message -> { count, sample, files }
@@ -120,15 +155,55 @@ if (surveyIndex !== -1) {
       console.log(`      - ${f}`);
     }
   }
+  let failedGate = false;
+
   if (passSpecimenFailures.length > 0) {
     console.log(`\nNG  ${passSpecimenFailures.length} pass specimen(s) failed to parse — this is the gate:`);
     for (const f of passSpecimenFailures) {
       console.log(`    ${f}`);
     }
-    process.exit(1);
+    failedGate = true;
+  } else {
+    console.log('\nOK  every pass specimen parsed');
   }
-  console.log('\nOK  every pass specimen parsed');
-  process.exit(0);
+
+  // Second gate: the overall rate against the recorded baseline.
+  //
+  // The pass-specimen gate above cannot see a regression among the *fail*
+  // specimens, and that is where most of the corpus lives. Those files are
+  // intentionally broken, so failing to parse them is not wrong — but going
+  // from "read 2881 of them" to "read 2860" means something changed, and the
+  // survey would otherwise print a smaller number in the same green shape.
+  //
+  // An INCREASE is also non-zero, deliberately. A floor that is never raised
+  // stops detecting anything: improve to 2890 without moving the lock, and a
+  // later slide back to 2882 passes silently. Raising it in the same commit as
+  // the improvement is the whole cost, and it keeps the number in ROADMAP.md a
+  // measurement rather than a memory.
+  const { baselineParsed, specimens } = lock.veraPDFCorpus;
+  if (total !== specimens) {
+    console.log(
+      `\nNG  walked ${total} specimens, corpus.lock.json says ${specimens} — the corpus is not what the lock describes`,
+    );
+    failedGate = true;
+  } else if (ok < baselineParsed) {
+    console.log(
+      `\nNG  ${ok}/${total} parsed, below the recorded baseline ${baselineParsed}/${specimens}.\n` +
+        `    ${baselineParsed - ok} specimen(s) that used to parse no longer do — see the grouped failures above.`,
+    );
+    failedGate = true;
+  } else if (ok > baselineParsed) {
+    console.log(
+      `\nNG  ${ok}/${total} parsed, ABOVE the recorded baseline ${baselineParsed}/${specimens} — this is good news, and the gate still fails.\n` +
+        `    Set "baselineParsed": ${ok} in corpus.lock.json in this same commit.\n` +
+        '    A baseline left behind an improvement stops catching the slide back to it.',
+    );
+    failedGate = true;
+  } else {
+    console.log(`OK  ${ok}/${total} parsed — matches the recorded baseline`);
+  }
+
+  process.exit(failedGate ? 1 : 0);
 }
 
 // --- gate mode: pdf20examples, any failure is a regression ---

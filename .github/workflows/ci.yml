@@ -1,0 +1,71 @@
+name: CI
+
+# The corpus gate is the point of this workflow.
+#
+# `npm test` measures the units; it does not measure whether this library can
+# still read 2,907 real PDFs. That number lives in ROADMAP.md and in
+# corpus.lock.json, and until now it was only true when somebody remembered to
+# run `npm run corpus:survey` by hand. A claim that is only checked when
+# remembered is not a gate.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck / test / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check
+
+  corpus:
+    name: corpus regression (pinned)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # Keyed on the pinned commit, so a pin bump misses the cache on purpose —
+      # that is the one time the corpus must actually be re-downloaded.
+      - name: Read the corpus pin
+        id: pin
+        run: echo "sha=$(node -p "require('./corpus.lock.json').veraPDFCorpus.commit")" >> "$GITHUB_OUTPUT"
+      - name: Restore corpus
+        uses: actions/cache@v4
+        with:
+          path: corpus
+          key: corpus-${{ steps.pin.outputs.sha }}
+
+      # A no-op (0.3 s) on a cache hit; ~18 s and 136 MB on a miss. Verifies the
+      # specimen count either way, because a truncated download extracts clean.
+      - run: npm run corpus:fetch
+
+      # Two gates, both in this one command:
+      #   - every "pass" specimen parses (a file veraPDF calls COMPLIANT that
+      #     this library cannot read is a defect, full stop)
+      #   - the overall rate equals the recorded baseline — below it is a
+      #     regression, above it means corpus.lock.json was left behind an
+      #     improvement and has stopped protecting the floor
+      - run: npm run corpus:survey
