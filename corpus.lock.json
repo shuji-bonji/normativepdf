@@ -10,6 +10,11 @@
     "Measured 2026-08-13 against the SHA below: 2881/2907 (99.1%), every pass specimen",
     "parsed. `baselineParsed` is the gate's floor, not a target — see scripts/parse-corpus.mjs.",
     "",
+    "`baselineRoundTrip` is the stage-1 figure (ADR-0004): specimens that survive",
+    "read → write → read with an equal object graph. Its denominator is smaller than",
+    "`baselineParsed` because a file can parse while one of its objects cannot be fetched,",
+    "and because encrypted files are counted as not measurable rather than as failures.",
+    "",
     "To move the pin: update `commit`, re-run `npm run corpus:fetch` (it re-fetches when the",
     "recorded commit differs), re-run `npm run corpus:survey`, and update the numbers here in",
     "the SAME commit. A pin bump and a code change must never share a commit — otherwise the",
@@ -22,6 +27,7 @@
     "license": "CC BY 4.0",
     "specimens": 2907,
     "baselineParsed": 2881,
+    "baselineRoundTrip": 2879,
     "measuredAt": "2026-08-13"
   }
 }

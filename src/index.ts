@@ -37,6 +37,9 @@ export {
   DEFAULT_PREDICTOR_PARMS,
   type PredictorParms,
 } from './filter/predictor.js';
+export type { WritableObject, WriteFileOptions } from './serialize/file-writer.js';
+export { collectObjects, rewrite, writeFile } from './serialize/file-writer.js';
+export { ByteWriter, writeIndirectObject, writeObject } from './serialize/object-writer.js';
 export {
   EOF,
   hexValue,

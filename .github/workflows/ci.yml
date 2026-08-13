@@ -69,3 +69,12 @@ jobs:
       #     regression, above it means corpus.lock.json was left behind an
       #     improvement and has stopped protecting the floor
       - run: npm run corpus:survey
+
+      # Stage 1 (ADR-0004): read → write → read, plus qpdf as the face that
+      # does not share this repository's parser. Measured: making the trailer
+      # /Size disagree with the table leaves the round-trip at 2879/2879 and is
+      # caught by qpdf on 2543 specimens — which is the whole argument for
+      # running both.
+      - name: Install qpdf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qpdf
+      - run: npm run roundtrip:survey
