@@ -508,10 +508,22 @@ function readStartxref(bytes: Uint8Array): number {
     throw new ParseError('the last line of the file shall contain %%EOF (§7.5.5)', cur.pos);
   }
   cur.advance(EOF_MARKER.length);
-  cur.tryConsumeEol();
-  if (!cur.atEnd) {
-    throw new ParseError('the last line of the file shall contain only %%EOF (§7.5.5)', cur.pos);
-  }
+  // §7.5.5 says "the last line of the file shall contain only the end-of-file
+  // marker, %%EOF", and bytes after it violate that. **It is not enforced
+  // here**, for the same reason R-7.5.4-31 is not: it is a conformance rule,
+  // not a functional one. Nothing about locating `startxref` depends on what
+  // follows %%EOF, so a file with trailing bytes still functions — qpdf reads
+  // veraPDF-corpus "6-1-3-t03-fail-a.pdf" (which ends `%%EOF\nSomeData`)
+  // without complaint, and that specimen is a *PDF/A* failure, which is
+  // pdf-verify-mcp's verdict to give (DESIGN §4.2).
+  //
+  // 🔴 Measured demand, from the second consumer rather than the corpus:
+  // pdf-writer-mcp's incremental-update fixtures append a marker comment after
+  // %%EOF, and enforcing this rule made **13 of its tests fail** on files it
+  // had always handled. The corpus had already flagged the same thing twice
+  // (isartor-6-1-3-t03-fail-a, veraPDF 6-1-3-t03-fail-a) and both were
+  // dismissed as "intentionally broken" without asking whether the breakage
+  // was one a *reader* should tolerate.
   return offset;
 }
 

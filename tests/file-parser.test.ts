@@ -244,6 +244,26 @@ describe('tail structure (§7.5.5)', () => {
     await expect(parsePdf(b.bytes)).rejects.toThrow(/startxref/);
   });
 
+  it('🔴 accepts bytes after %%EOF — a conformance rule, not a functional one (§7.5.5)', async () => {
+    // "The last line of the file shall contain only the end-of-file marker,
+    // %%EOF" — so trailing bytes violate the clause. This parser does not
+    // enforce it, on the same grounds as R-7.5.4-31: nothing about locating
+    // `startxref` depends on what follows %%EOF, so the file still functions.
+    // Whether it *conforms* is pdf-verify-mcp's verdict (DESIGN §4.2).
+    //
+    // Two specimens forced this: veraPDF-corpus "6-1-3-t03-fail-a.pdf" and its
+    // Isartor twin, which end `%%EOF\nSomeData` and which qpdf reads without
+    // complaint. The demand was confirmed by the second consumer —
+    // pdf-writer-mcp's incremental fixtures put a marker comment after %%EOF,
+    // and enforcing the rule broke 13 of its tests.
+    //
+    // T-3: restore the `if (!cur.atEnd) throw` in readStartxref and this fails.
+    const b = buildPdf([CATALOG]);
+    const withTrailing = new Uint8Array([...b.bytes, ...enc('SomeData')]);
+    const doc = await parsePdf(withTrailing);
+    expect((await doc.getCatalog()).kind).toBe('dict');
+  });
+
   it('accepts white-space between the last entry and trailer (§7.2.3; the PDF Association incremental-save example has a blank line there)', async () => {
     const b = buildPdf([CATALOG, STRING_OBJ]);
     const spaced = b.text.replace('trailer\n', '\r\n\ntrailer\n');
