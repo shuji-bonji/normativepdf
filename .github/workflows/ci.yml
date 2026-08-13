@@ -78,3 +78,11 @@ jobs:
       - name: Install qpdf
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qpdf
       - run: npm run roundtrip:survey
+
+      # The same corpus through the other two output forms (§7.5.8 / §7.5.7).
+      # Both found real defects the table path did not have — a /Filter carried
+      # onto an unencoded stream (487 specimens) and a container taking an
+      # object number something already referenced — so they are gated, not
+      # merely available.
+      - run: node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf --mode stream
+      - run: node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf --mode objstm

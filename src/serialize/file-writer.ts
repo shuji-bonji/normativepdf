@@ -24,7 +24,11 @@
 import type { CosDict, CosObject } from '../cos/types.js';
 import { dictGetRaw } from '../cos/types.js';
 import type { PdfDocument } from '../file/file-parser.js';
+import type { CompressedPlacement } from './object-stream-writer.js';
+import { buildObjectStream, partitionForObjectStream } from './object-stream-writer.js';
 import { ByteWriter, writeIndirectObject, writeObject } from './object-writer.js';
+import type { XrefStreamEntry } from './xref-stream-writer.js';
+import { buildXrefStream } from './xref-stream-writer.js';
 
 /** One object to place in the body, with the number it keeps. */
 export interface WritableObject {
@@ -42,6 +46,21 @@ export interface WriteFileOptions {
    * would silently upgrade the file.
    */
   readonly version?: string;
+  /**
+   * Which cross-reference mechanism to write.
+   *
+   * `'table'` (default) is the classic table of §7.5.4, readable by every
+   * version of PDF. `'stream'` is the cross-reference stream of §7.5.8, which
+   * requires a PDF 1.5 reader and is what object streams need in order to be
+   * addressable at all (§7.5.7 NOTE 3).
+   */
+  readonly xref?: 'table' | 'stream';
+  /**
+   * Store eligible objects in an object stream (§7.5.7). Requires
+   * `xref: 'stream'` — a classic table has no way to point at an object inside
+   * a stream, since its entry format predates them.
+   */
+  readonly objectStreams?: boolean;
 }
 
 /**
@@ -105,6 +124,41 @@ function buildTrailer(source: CosDict, size: number): CosDict {
 }
 
 /**
+ * The largest object number any reference in the document points at, whether
+ * or not an object with that number exists (§7.3.10).
+ */
+function highestReferencedNumber(objects: readonly WritableObject[], trailer: CosDict): number {
+  let highest = 0;
+  const visit = (value: CosObject): void => {
+    switch (value.kind) {
+      case 'ref':
+        highest = Math.max(highest, value.objectNumber);
+        return;
+      case 'array':
+        for (const item of value.items) {
+          visit(item);
+        }
+        return;
+      case 'dict':
+        for (const entry of value.entries.values()) {
+          visit(entry);
+        }
+        return;
+      case 'stream':
+        visit(value.dict);
+        return;
+      default:
+        return;
+    }
+  };
+  visit(trailer);
+  for (const { object } of objects) {
+    visit(object);
+  }
+  return highest;
+}
+
+/**
  * Serialize a complete PDF file from a set of numbered objects.
  *
  * The objects are written in ascending object-number order — not because the
@@ -131,26 +185,92 @@ export function writeFile(
   // deterministic.
   out.bytes(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
 
-  const sorted = [...objects].sort((a, b) => a.objectNumber - b.objectNumber);
-  const offsets = new Map<number, { offset: number; generation: number }>();
+  const useStream = options.xref === 'stream';
+  const useObjectStreams = options.objectStreams === true;
+  if (useObjectStreams && !useStream) {
+    throw new RangeError(
+      'object streams require a cross-reference stream to address them (§7.5.7 NOTE 3); pass xref: "stream"',
+    );
+  }
 
-  for (const { objectNumber, generationNumber, object } of sorted) {
+  const sorted = [...objects].sort((a, b) => a.objectNumber - b.objectNumber);
+  for (const { objectNumber } of sorted) {
     if (objectNumber < 1) {
       throw new RangeError(
         `object number 0 is reserved for the head of the free list (§7.5.4); got ${objectNumber}`,
       );
     }
-    if (offsets.has(objectNumber)) {
+  }
+  const seen = new Set<number>();
+  for (const { objectNumber } of sorted) {
+    if (seen.has(objectNumber)) {
       throw new RangeError(
         `object ${objectNumber} was supplied twice — an object number identifies one object (R-7.3.10-6)`,
       );
     }
+    seen.add(objectNumber);
+  }
+
+  // Object numbers for the containers this writer adds. §7.5.7 requires new
+  // object streams to be "assigned new object numbers, not old ones taken from
+  // the free list" (R-7.5.7-17), so they go above everything supplied.
+  //
+  // 🔴 Above everything *referenced*, not merely everything defined. A file can
+  // hold a reference to an object number that does not exist — which reads as
+  // null (R-7.3.10-13) and is perfectly quiet. Creating an object at that
+  // number turns the dangling reference into a live one pointing at this
+  // writer's bookkeeping. Measured on veraPDF-corpus
+  // "6-2-11-4-1-t01-fail-a.pdf": `/Info 21 0 R` with nothing at 21, so the new
+  // cross-reference stream landed there and qpdf reported "operation for
+  // dictionary attempted on object of type stream".
+  let nextNumber =
+    Math.max(sorted.at(-1)?.objectNumber ?? 0, highestReferencedNumber(objects, trailerSource)) + 1;
+  const objectStreamNumber = useObjectStreams ? nextNumber++ : null;
+  const xrefStreamNumber = useStream ? nextNumber++ : null;
+
+  let toPlace = sorted;
+  let compressed: readonly CompressedPlacement[] = [];
+  if (useObjectStreams && objectStreamNumber !== null) {
+    const encrypt = dictGetRaw(trailerSource, 'Encrypt');
+    const { compressible, plain } = partitionForObjectStream(
+      sorted,
+      encrypt?.kind === 'ref' ? encrypt.objectNumber : undefined,
+    );
+    if (compressible.length > 0) {
+      const built = buildObjectStream(compressible);
+      compressed = built.placements;
+      toPlace = [
+        ...plain,
+        { objectNumber: objectStreamNumber, generationNumber: 0, object: built.stream },
+      ].sort((a, b) => a.objectNumber - b.objectNumber);
+    }
+  }
+
+  const offsets = new Map<number, { offset: number; generation: number }>();
+  for (const { objectNumber, generationNumber, object } of toPlace) {
     offsets.set(objectNumber, { offset: out.length, generation: generationNumber });
     writeIndirectObject(out, objectNumber, generationNumber, object);
   }
 
-  const highest = sorted.at(-1)?.objectNumber ?? 0;
+  const highest = Math.max(
+    sorted.at(-1)?.objectNumber ?? 0,
+    objectStreamNumber ?? 0,
+    xrefStreamNumber ?? 0,
+  );
   const size = highest + 1;
+
+  if (useStream && xrefStreamNumber !== null) {
+    return writeWithXrefStream({
+      out,
+      offsets,
+      compressed,
+      objectStreamNumber,
+      xrefStreamNumber,
+      highest,
+      size,
+      trailerSource,
+    });
+  }
 
   // §7.5.5: startxref carries the offset "to the beginning of the xref
   // keyword in the last cross-reference section".
@@ -181,6 +301,75 @@ export function writeFile(
   out.ascii('trailer\n');
   writeObject(out, buildTrailer(trailerSource, size));
   out.ascii(`\nstartxref\n${xrefOffset}\n%%EOF\n`);
+
+  return out.toUint8Array();
+}
+
+/**
+ * Finish a file whose cross-reference information is a stream (§7.5.8).
+ *
+ * Two differences from the classic tail, both required rather than chosen:
+ * `startxref` carries "the byte offset of the cross-reference stream rather
+ * than the xref keyword" (R-7.5.8.1-2), and the `xref` and `trailer` keywords
+ * "shall no longer be used" (R-7.5.8.1-3) because the stream dictionary is the
+ * trailer.
+ */
+function writeWithXrefStream(input: {
+  out: ByteWriter;
+  offsets: ReadonlyMap<number, { offset: number; generation: number }>;
+  compressed: readonly CompressedPlacement[];
+  objectStreamNumber: number | null;
+  xrefStreamNumber: number;
+  highest: number;
+  size: number;
+  trailerSource: CosDict;
+}): Uint8Array {
+  const { out, offsets, compressed, objectStreamNumber, xrefStreamNumber, highest, size } = input;
+
+  const entries = new Map<number, XrefStreamEntry>();
+  // §7.5.4's requirement that object 0 head the free list with generation
+  // 65535 is expressed here as a type 0 entry; Table 18 gives the same two
+  // fields (next free object, generation).
+  entries.set(0, { type: 'free', nextFree: 0, generation: 65_535 });
+  for (const [objectNumber, placed] of offsets) {
+    entries.set(objectNumber, {
+      type: 'in-use',
+      offset: placed.offset,
+      generation: placed.generation,
+    });
+  }
+  for (const { objectNumber, indexInStream } of compressed) {
+    if (objectStreamNumber === null) {
+      throw new Error('compressed objects were placed without an object stream to hold them');
+    }
+    entries.set(objectNumber, {
+      type: 'compressed',
+      streamObjectNumber: objectStreamNumber,
+      indexInStream,
+    });
+  }
+  // Numbers nothing occupies are still described, so the section covers a
+  // contiguous range and `/Index` stays a single subsection for a fresh write.
+  for (let number = 1; number <= highest; number += 1) {
+    if (!entries.has(number)) {
+      entries.set(number, { type: 'free', nextFree: 0, generation: 65_535 });
+    }
+  }
+
+  // The stream is an indirect object and needs an entry for itself, "usually
+  // itself" (R-7.5.8.3-5) — so its offset is taken before it is written.
+  const xrefOffset = out.length;
+  entries.set(xrefStreamNumber, { type: 'in-use', offset: xrefOffset, generation: 0 });
+
+  const trailerEntries = new Map<string, CosObject>(input.trailerSource.entries);
+  trailerEntries.delete('Prev');
+  trailerEntries.delete('XRefStm');
+  const { stream } = buildXrefStream(entries, size, {
+    kind: 'dict',
+    entries: trailerEntries,
+  });
+  writeIndirectObject(out, xrefStreamNumber, 0, stream);
+  out.ascii(`startxref\n${xrefOffset}\n%%EOF\n`);
 
   return out.toUint8Array();
 }

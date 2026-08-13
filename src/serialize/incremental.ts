@@ -32,8 +32,10 @@
 import type { CosDict, CosObject } from '../cos/types.js';
 import { dictGetRaw } from '../cos/types.js';
 import type { PdfDocument } from '../file/file-parser.js';
-import { ByteWriter, writeIndirectObject, writeObject } from './object-writer.js';
 import type { WritableObject } from './file-writer.js';
+import { ByteWriter, writeIndirectObject, writeObject } from './object-writer.js';
+import type { XrefStreamEntry } from './xref-stream-writer.js';
+import { buildXrefStream } from './xref-stream-writer.js';
 
 /** An object number the update marks as deleted (§7.5.6). */
 export interface DeletedObject {
@@ -74,6 +76,23 @@ export interface AppendUpdateInput {
    * the end of the acceptance chain.
    */
   readonly origin?: number;
+  /**
+   * Which cross-reference form the appended section uses.
+   *
+   * §7.5.6 does not require an update to match the section before it, and a
+   * `/Prev` leading from a table into a cross-reference stream is read the same
+   * way either direction. Measured on `selfmade-pades-lta.pdf`, whose newest
+   * section is a stream: appending a classic table leaves both signatures
+   * VALID and qpdf silent. The option exists so an update can still match the
+   * source's form, which is what PDF/A validation is expected to care about.
+   */
+  readonly xref?: 'table' | 'stream';
+  /**
+   * Object number to give the update's cross-reference stream. Required with
+   * `xref: 'stream'`, because only the caller knows which numbers the whole
+   * file — not just this update — has already used.
+   */
+  readonly xrefStreamObjectNumber?: number;
 }
 
 /** §7.5.4 — one 20-byte entry. Shared shape with the full-file writer. */
@@ -187,9 +206,40 @@ export function appendUpdate(input: AppendUpdateInput): AppendUpdateResult {
     changed.set(objectNumber, { generation: generationNumber, offset: null });
   }
 
+  const numbers = [...changed.keys()].sort((a, b) => a - b);
+
+  // Table 15: Size is "1 greater than the highest object number defined in the
+  // PDF file" across the original and every update section.
+  const previousSize = dictGetRaw(previousTrailer, 'Size');
+  const previousHighest = previousSize?.kind === 'integer' ? previousSize.value : 0;
+
+  if (input.xref === 'stream') {
+    const streamNumber = input.xrefStreamObjectNumber;
+    if (streamNumber === undefined) {
+      throw new RangeError(
+        'xref: "stream" needs xrefStreamObjectNumber — only the caller knows which numbers the whole file has used',
+      );
+    }
+    if (changed.has(streamNumber)) {
+      throw new RangeError(
+        `object ${streamNumber} is both updated and used for the update's cross-reference stream (R-7.3.10-6)`,
+      );
+    }
+    return finishWithXrefStream({
+      out,
+      origin,
+      original,
+      changed,
+      numbers,
+      streamNumber,
+      size: Math.max(previousHighest, (numbers.at(-1) ?? 0) + 1, streamNumber + 1),
+      previousTrailer,
+      previousXrefOffset,
+    });
+  }
+
   const xrefOffset = out.length - origin;
   out.ascii('xref\n');
-  const numbers = [...changed.keys()].sort((a, b) => a - b);
   for (const { start, count } of subsections(numbers)) {
     out.ascii(`${start} ${count}\n`);
     for (let number = start; number < start + count; number += 1) {
@@ -207,16 +257,63 @@ export function appendUpdate(input: AppendUpdateInput): AppendUpdateResult {
     }
   }
 
-  // Table 15: Size is "1 greater than the highest object number defined in the
-  // PDF file" across the original and every update section.
-  const previousSize = dictGetRaw(previousTrailer, 'Size');
-  const previousHighest =
-    previousSize?.kind === 'integer' ? previousSize.value : (numbers.at(-1) ?? 0) + 1;
   const size = Math.max(previousHighest, (numbers.at(-1) ?? 0) + 1);
 
   out.ascii('trailer\n');
   writeObject(out, buildTrailer(previousTrailer, previousXrefOffset, size));
   out.ascii(`\nstartxref\n${xrefOffset}\n%%EOF\n`);
+
+  const bytes = out.toUint8Array();
+  assertOriginalIntact(original, bytes);
+  return { bytes, xrefOffset };
+}
+
+/**
+ * Finish an update whose cross-reference section is a stream (§7.5.8).
+ *
+ * The stream dictionary is the trailer, so the `xref` and `trailer` keywords
+ * are not written (R-7.5.8.1-3) and `startxref` points at the stream object
+ * (R-7.5.8.1-2). `/Prev` still names the previous section exactly as §7.5.6
+ * requires — the mechanism changes, the chain does not.
+ */
+function finishWithXrefStream(input: {
+  out: ByteWriter;
+  origin: number;
+  original: Uint8Array;
+  changed: ReadonlyMap<number, { generation: number; offset: number | null }>;
+  numbers: readonly number[];
+  streamNumber: number;
+  size: number;
+  previousTrailer: CosDict;
+  previousXrefOffset: number;
+}): AppendUpdateResult {
+  const { out, origin, original, changed, numbers, streamNumber, size } = input;
+
+  const entries = new Map<number, XrefStreamEntry>();
+  for (const number of numbers) {
+    const entry = changed.get(number);
+    if (entry === undefined) {
+      continue;
+    }
+    entries.set(
+      number,
+      entry.offset === null
+        ? { type: 'free', nextFree: 0, generation: entry.generation }
+        : { type: 'in-use', offset: entry.offset, generation: entry.generation },
+    );
+  }
+
+  // The stream needs an entry for itself (R-7.5.8.3-5), so its offset is taken
+  // before it is written.
+  const xrefOffset = out.length - origin;
+  entries.set(streamNumber, { type: 'in-use', offset: xrefOffset, generation: 0 });
+
+  const trailerEntries = new Map<string, CosObject>(input.previousTrailer.entries);
+  trailerEntries.set('Prev', { kind: 'integer', value: input.previousXrefOffset });
+  trailerEntries.delete('XRefStm');
+  const { stream } = buildXrefStream(entries, size, { kind: 'dict', entries: trailerEntries });
+  writeIndirectObject(out, streamNumber, 0, stream);
+  out.ascii(`startxref\n${xrefOffset}\n%%EOF\n`);
 
   const bytes = out.toUint8Array();
   assertOriginalIntact(original, bytes);
@@ -256,11 +353,23 @@ export function appendUpdateTo(
   doc: PdfDocument,
   objects: readonly WritableObject[],
   deleted?: readonly DeletedObject[],
+  options: Pick<AppendUpdateInput, 'xref'> = {},
 ): AppendUpdateResult {
   const startxref = findLastStartxref(doc.bytes);
   if (startxref === null) {
-    throw new Error('no startxref found, so the previous cross-reference section cannot be named (§7.5.5)');
+    throw new Error(
+      'no startxref found, so the previous cross-reference section cannot be named (§7.5.5)',
+    );
   }
+  // The stream's own object number has to clear everything the file already
+  // uses, including numbers that are only referenced (see file-writer's
+  // highestReferencedNumber for what happens when it does not).
+  const highest = Math.max(
+    0,
+    ...doc.xref.keys(),
+    ...objects.map((o) => o.objectNumber),
+    ...(deleted ?? []).map((o) => o.objectNumber),
+  );
   return appendUpdate({
     original: doc.bytes,
     previousXrefOffset: startxref,
@@ -268,6 +377,8 @@ export function appendUpdateTo(
     objects,
     ...(deleted === undefined ? {} : { deleted }),
     origin: doc.origin,
+    ...(options.xref === undefined ? {} : { xref: options.xref }),
+    ...(options.xref === 'stream' ? { xrefStreamObjectNumber: highest + 1 } : {}),
   });
 }
 

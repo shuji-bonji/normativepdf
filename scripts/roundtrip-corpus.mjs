@@ -176,7 +176,7 @@ async function roundTrip(bytes) {
 
   let written;
   try {
-    written = writeFile(objects, source.trailer, { version: source.headerVersion });
+    written = writeFile(objects, source.trailer, { version: source.headerVersion, ...writeOptions });
   } catch (error) {
     return { outcome: 'write-failed', reason: message(error) };
   }
@@ -285,6 +285,25 @@ const surveyIndex = args.indexOf('--survey');
 const withQpdf = args.includes('--qpdf');
 const qpdfSampleIndex = args.indexOf('--qpdf-sample');
 const qpdfSample = qpdfSampleIndex !== -1 ? Number.parseInt(args[qpdfSampleIndex + 1], 10) : Infinity;
+
+/**
+ * Which cross-reference form the rewrite uses. The baseline in
+ * corpus.lock.json is measured with the default (`table`); the other modes are
+ * run the same way so a comparison is like for like.
+ *   --mode table | stream | objstm
+ */
+const modeIndex = args.indexOf('--mode');
+const mode = modeIndex !== -1 ? args[modeIndex + 1] : 'table';
+const writeOptions =
+  mode === 'objstm'
+    ? { xref: 'stream', objectStreams: true }
+    : mode === 'stream'
+      ? { xref: 'stream' }
+      : {};
+if (!['table', 'stream', 'objstm'].includes(mode)) {
+  console.error(`NG  --mode shall be table, stream or objstm; got ${mode}`);
+  process.exit(1);
+}
 
 function assertPinnedCorpus() {
   const { commit } = lock.veraPDFCorpus;

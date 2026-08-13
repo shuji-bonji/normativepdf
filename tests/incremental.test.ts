@@ -31,24 +31,48 @@ function lastSection(bytes: Uint8Array): string {
   const at = text.lastIndexOf('\nxref\n');
   return at < 0 ? '' : text.slice(at + 1);
 }
-const dict = (entries: [string, CosObject][]): CosDict => ({ kind: 'dict', entries: new Map(entries) });
+const dict = (entries: [string, CosObject][]): CosDict => ({
+  kind: 'dict',
+  entries: new Map(entries),
+});
 const ref = (n: number): CosObject => ({ kind: 'ref', objectNumber: n, generationNumber: 0 });
 const nm = (v: string): CosObject => ({ kind: 'name', value: v });
 const int = (v: number): CosObject => ({ kind: 'integer', value: v });
 
 function baseObjects(): WritableObject[] {
   return [
-    { objectNumber: 1, generationNumber: 0, object: dict([['Type', nm('Catalog')], ['Pages', ref(2)]]) },
+    {
+      objectNumber: 1,
+      generationNumber: 0,
+      object: dict([
+        ['Type', nm('Catalog')],
+        ['Pages', ref(2)],
+      ]),
+    },
     {
       objectNumber: 2,
       generationNumber: 0,
-      object: dict([['Type', nm('Pages')], ['Kids', { kind: 'array', items: [ref(3)] }], ['Count', int(1)]]),
+      object: dict([
+        ['Type', nm('Pages')],
+        ['Kids', { kind: 'array', items: [ref(3)] }],
+        ['Count', int(1)],
+      ]),
     },
-    { objectNumber: 3, generationNumber: 0, object: dict([['Type', nm('Page')], ['Parent', ref(2)]]) },
+    {
+      objectNumber: 3,
+      generationNumber: 0,
+      object: dict([
+        ['Type', nm('Page')],
+        ['Parent', ref(2)],
+      ]),
+    },
   ];
 }
 
-const baseTrailer = dict([['Root', ref(1)], ['Info', ref(9)]]);
+const baseTrailer = dict([
+  ['Root', ref(1)],
+  ['Info', ref(9)],
+]);
 
 /** A one-revision file to update, plus the offsets an update needs. */
 async function baseFile() {
@@ -60,7 +84,10 @@ async function baseFile() {
 const annotation: WritableObject = {
   objectNumber: 4,
   generationNumber: 0,
-  object: dict([['Type', nm('Annot')], ['Subtype', nm('Text')]]),
+  object: dict([
+    ['Type', nm('Annot')],
+    ['Subtype', nm('Text')],
+  ]),
 };
 
 describe('the original contents are left intact (§7.5.6)', () => {
@@ -136,9 +163,9 @@ describe('the update section (§7.5.4, §7.5.6)', () => {
     expect(() => appendUpdateTo(doc, [{ ...annotation, objectNumber: 0 }])).toThrow(/NOTE 3/);
     expect(() => appendUpdateTo(doc, [annotation, annotation])).toThrow(/R-7.3.10-6/);
     expect(() => appendUpdateTo(doc, [])).toThrow(/§7.5.6/);
-    expect(() => appendUpdateTo(doc, [annotation], [{ objectNumber: 4, generationNumber: 1 }])).toThrow(
-      /both written and deleted/,
-    );
+    expect(() =>
+      appendUpdateTo(doc, [annotation], [{ objectNumber: 4, generationNumber: 1 }]),
+    ).toThrow(/both written and deleted/);
   });
 });
 
@@ -169,7 +196,11 @@ describe('the added trailer (§7.5.6, §7.5.5 Table 15)', () => {
   });
 
   it('drops a /Prev inherited from the previous trailer rather than keeping both', () => {
-    const previous = dict([['Root', ref(1)], ['Prev', int(111)], ['Size', int(4)]]);
+    const previous = dict([
+      ['Root', ref(1)],
+      ['Prev', int(111)],
+      ['Size', int(4)],
+    ]);
     const { bytes } = appendUpdate({
       original: new TextEncoder().encode('%PDF-1.7\n%%EOF\n'),
       previousXrefOffset: 222,
@@ -182,7 +213,11 @@ describe('the added trailer (§7.5.6, §7.5.5 Table 15)', () => {
   });
 
   it('drops /XRefStm, which describes the previous section (§7.5.8.4 Table 19)', () => {
-    const previous = dict([['Root', ref(1)], ['XRefStm', int(555)], ['Size', int(4)]]);
+    const previous = dict([
+      ['Root', ref(1)],
+      ['XRefStm', int(555)],
+      ['Size', int(4)],
+    ]);
     const { bytes } = appendUpdate({
       original: new TextEncoder().encode('%PDF-1.7\n%%EOF\n'),
       previousXrefOffset: 222,
@@ -199,7 +234,10 @@ describe('the added trailer (§7.5.6, §7.5.5 Table 15)', () => {
     const grow = appendUpdate({
       original,
       previousXrefOffset: 0,
-      previousTrailer: dict([['Root', ref(1)], ['Size', int(4)]]),
+      previousTrailer: dict([
+        ['Root', ref(1)],
+        ['Size', int(4)],
+      ]),
       objects: [{ ...annotation, objectNumber: 99 }],
     });
     expect(latin1(grow.bytes)).toContain('/Size 100');
@@ -207,7 +245,10 @@ describe('the added trailer (§7.5.6, §7.5.5 Table 15)', () => {
     const keep = appendUpdate({
       original,
       previousXrefOffset: 0,
-      previousTrailer: dict([['Root', ref(1)], ['Size', int(500)]]),
+      previousTrailer: dict([
+        ['Root', ref(1)],
+        ['Size', int(500)],
+      ]),
       objects: [annotation],
     });
     expect(latin1(keep.bytes)).toContain('/Size 500');
@@ -245,7 +286,14 @@ describe('the newest copy of an object is the one that resolves (§7.5.6)', () =
     // "the most recent copy of each object shall be the one accessed".
     const { doc } = await baseFile();
     const { bytes } = appendUpdateTo(doc, [
-      { objectNumber: 3, generationNumber: 0, object: dict([['Type', nm('Page')], ['Rotate', int(90)]]) },
+      {
+        objectNumber: 3,
+        generationNumber: 0,
+        object: dict([
+          ['Type', nm('Page')],
+          ['Rotate', int(90)],
+        ]),
+      },
     ]);
     const back = await parsePdf(bytes);
     const page = await back.getObject(3, 0);
