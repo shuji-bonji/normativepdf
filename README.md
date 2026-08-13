@@ -2,7 +2,7 @@
 
 > **A clause-driven PDF library in pure TypeScript.** Every behaviour is tied to a clause of the ISO specifications; what cannot be tied is not claimed.
 >
-> 🚧 **Early development.** Stage 0 (COS object model + parser) is implemented and measured against public corpora. Not yet published to npm.
+> 🚧 **Early development.** Stage 0 (COS object model + parser) and stage 1 (serializer + incremental updates) are implemented and measured against public corpora.
 >
 > 日本語版: [README.ja.md](README.ja.md)
 
@@ -24,17 +24,33 @@ pdf-writer-mcp / pdf-verify-mcp), whose writer currently delegates to `pdf-lib` 
 the result that clause violations can be *identified* but not *fixed*
 ([docs/PRIOR-ART.md](docs/PRIOR-ART.md)). The family is the first user, not the target.
 
-## Current state (stage 0, 2026-08-11)
+## Current state (stage 1, 2026-08-13)
 
 | Gate | Result |
 |---|---|
 | [pdf20examples](https://github.com/pdf-association/pdf20examples) (CC BY-SA 4.0) | **7/7 parsed** end-to-end (every in-use/compressed object resolved, catalog included) |
 | [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus) (CC BY 4.0, 2907 specimens, Isartor included) | **99.1% parsed; every *pass* specimen parses.** The 26 failures are all intentionally broken *fail* specimens, rejected with the violated clause named |
+| Round-trip (read → write → read), all three output forms | **2879/2879** with an equal object graph — classic table, cross-reference stream, and object streams |
+| `qpdf --check`, source vs rewrite | **2879/2879 introduce no complaint the source did not already have**, in all three forms |
+| Incremental update on a signed specimen | **Both signatures stay VALID** (CAdES + document timestamp), whichever cross-reference form is appended |
 
-Implemented: COS object model (10-type discriminated union), lexer, object parser,
-file-structure parser (classic xref, trailer, `Prev` chain, incremental updates),
-cross-reference streams, object streams, FlateDecode + PNG/TIFF predictors,
-catalog `/Version` upgrade (Table 29). Every error message cites the clause it enforces.
+The corpus is pinned by commit ([`corpus.lock.json`](corpus.lock.json)) so that a
+rate is a claim about this code and not about whichever specimens upstream shipped
+that week. Both figures are gates in CI, and a rate *above* the recorded baseline
+fails too — a floor left behind an improvement stops catching the slide back to it.
+
+Implemented — reading: COS object model (10-type discriminated union), lexer, object
+parser, file-structure parser (classic xref, trailer, `Prev` chain, incremental
+updates), cross-reference streams, object streams, FlateDecode + PNG/TIFF predictors,
+catalog `/Version` upgrade (Table 29).
+
+Implemented — writing: object and file serializers, classic cross-reference tables,
+cross-reference streams (§7.5.8), object streams (§7.5.7), and incremental updates
+(§7.5.6) that leave the original bytes untouched. Output is deterministic and
+uncompressed; `CompressionStream` is declined because its bytes are not stable across
+engines ([ADR-0003](docs/adr/0003-filter-strategy.md)).
+
+Every error message cites the clause it enforces.
 
 Recovery parsing is demand-driven: leniency is added only when a specimen that an
 independent validator accepts fails to parse — each relaxation records the specimen

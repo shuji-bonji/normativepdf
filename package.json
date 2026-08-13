@@ -1,6 +1,6 @@
 {
   "name": "normativepdf",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Clause-driven PDF library in pure TypeScript. Every behaviour tied to an ISO 32000 clause; what cannot be tied is not claimed.",
   "keywords": [
     "pdf",
@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "npm run typecheck && npm test && npm run check && npm run build && node scripts/parse-corpus.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run check && npm run build && node scripts/parse-corpus.mjs && node scripts/roundtrip-corpus.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "corpus:fetch": "node scripts/fetch-corpus.mjs",

@@ -76,7 +76,9 @@ flowchart LR
 - [x] **受入到達: 実署名検体で `verify_signatures` VALID 維持（2026-08-13）** — `selfmade-pades-lta.pdf`（CAdES 署名 + DocTimeStamp）に増分更新を掛け、pdf-verify-mcp で**署名 2 本とも VALID・digest 一致を維持**（差は `Bytes after signed range` が +346 のみ）。`dss-pades-lta.pdf`（4.2MB・DSS 付き）でも同様で、verify の revision-diff が追記したリビジョンを「obj 26 0: added — annotation (Text)」と正しく読んだ。4 検体（署名 2 + pdf20examples 2、うち 1 つは origin > 0）で 3 段すべて緑・qpdf も新しい苦情を出さない
   - **T-3 実測 5 通り**: origin を引かない = origin>0 のテストが落ちる / subsection をまとめる = 分割のテストが落ちる / `/Prev` を書かない = チェーンが伸びない / `/XRefStm` を残す = 検知 / **元バイト列を 1 バイト書き換える = 3 件落ちる**（モジュール自身の guard も発火）
   - 測っていないこと = **PDF/A 適合の維持**（元が xref ストリームのファイルに古典テーブルを追記する形になるため。xref ストリームの書きが入ってから測る。ADR-0005「測らないと決めたこと」）
-- [ ] writer の増分パスのみ移行
+- [ ] **writer の増分パスのみ移行 — 読み側だけに範囲を絞った（2026-08-13 判断）**。writer の `incremental.ts`（514 行）は pdf-lib のオブジェクトを `sizeInBytes`/`copyBytesInto` で直列化しており（「自前トークナイザを持たない」と冒頭に明記）、`appendUpdate` に寄せるには **pdf-lib → COS の変換層**が要る。それは Phase 3 で pdf-lib が消えたら丸ごと不要になるものなので作らない。また 514 行は構造だけでなく `/ID` の更新（§14.4）・DocMDP 判定・dirty 参照追跡という writer の方針を含み、移行後も残る。**置換するのは手書きパース 3 関数**（`readStartXref` / `detectXrefStyle` / `parsePreviousTrailer`）で、`readXrefChain` が `{ origin, startxref, sections[0].kind, sections[0].trailer }` を 1 回で返す
+  - 🔴 **調査中に writer の実欠陥を 1 件見つけた（writer B-22 に起票）**: origin > 0 のファイルで `startxref` を絶対位置として扱っており、`PDF 2.0 with offset start.pdf`（origin = 656）で xref 形式を `table` → `stream` と誤判定し、**追記後のファイルに qpdf が "file is damaged"** と言う。verify の revision-diff で踏んだのと同じ型。既存テストが全部 origin = 0 で書かれていて、この面を一度も測っていなかった
+  - **前提 = normativepdf 0.3.0 の公開**（未公開の書き側 API に依存するため）
 
 ### 段階 1 で実測した「門番が本当に落ちるか」（T-3）
 
