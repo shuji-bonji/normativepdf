@@ -32,7 +32,7 @@
     "license": "CC BY 4.0",
     "specimens": 2907,
     "baselineParsed": 2884,
-    "baselineRoundTrip": 2881,
+    "baselineRoundTrip": 2882,
     "measuredAt": "2026-08-14"
   }
 }
