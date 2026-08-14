@@ -156,15 +156,9 @@ export class PdfDocumentEditor {
     // An empty stand-in: no bytes, no cross-reference entries, and a chain
     // that is complete because there is nothing below it. Every read falls
     // through to the overlay, which is where the two objects below live.
-    const base = new PdfDocument(
-      new Uint8Array(0),
-      0,
-      version,
-      version,
-      trailer,
-      new Map(),
-      { kind: 'complete' },
-    );
+    const base = new PdfDocument(new Uint8Array(0), 0, version, version, trailer, new Map(), {
+      kind: 'complete',
+    });
     const editor = new PdfDocumentEditor(base, false);
 
     editor.set(CREATED_PAGES, {

@@ -201,7 +201,8 @@ ADR-0007 は「オーサリング API は writer に残す」と決めたが、
 | **L1** | `rgb` / `degrees` / `StandardFonts` の置き換え | ✅ 完了（2026-08-14）。実体呼び出し 23 → 19 ファイル |
 | **L1.5** | **文字幅**（`TextMetrics` = `metrics.ts`） | ✅ 完了。🔴 当初この表に無かった段（下記） |
 | **L2** | **文書モデル**（グラフ容器 + ページツリーの意味規定）→ [`l2-document-model.md`](l2-document-model.md) | ✅ 完了（ADR-0007・受入 4 面すべて充足・テスト 382） |
-| **L3'** | **生成パスを器ごと載せ替える** — ページ生成 + 描画 3 種 + ページ複写を writer に自前化し、`PDFDocument` を `PdfDocumentEditor` に差し替える。**COS もここで一緒に置き換わる** | ⬅ 次。§3.6 |
+| **L3'.0** | **normativepdf 0.4.0 の公開** — 部品 4 + L2 + `create()` + MCR。writer の dep を 0.3.1 → 0.4.0 | ⬅ ここで止まっている。**公開されるまで L3' は 1 行も型検査を通らない** |
+| **L3'** | **生成パスを器ごと載せ替える** — ページ生成 + 描画 3 種 + ページ複写を writer に自前化し、`PDFDocument` を `PdfDocumentEditor` に差し替える。**COS もここで一緒に置き換わる**。着手済み = `cos.ts` / `writer-doc.ts` / `font-embed.ts`（下記） | L3'.0 の後。§3.6 |
 | **L4'** | **`form.ts`（546 行）** — AcroForm の外観生成を含む独立した部分系 | L3' の後 |
 | **L5'** | **メトリクス自前化** — 標準 14 書体の幅表（L1.5 で帰属だけ決めて実装は残してある） | 最後 |
 
@@ -268,12 +269,93 @@ getSize が生成パスにあるという前提で書いてあったが、実測
    AFM から直接取ることになる（同梱済み・`Font.load(FontNames.Helvetica)` で
    `getWidthOfGlyph` / `Ascender` / `FontBBox` が取れることを実測）。
    **L1.5 の決定「メトリクスは writer の関心」はそのままだが、着手時期が動く。**
-3. ⚠️ **生成検体 9 本はすべて 1 ページ**（lock の `pageCount` 実測）。つまり
-   **構造要素がページをまたぐ経路（MCR 辞書・`struct-tree.ts:299-305`）はオラクルが測っていない**。
-   normativepdf の `StructTreeBuilder` は 2 ページにまたがる要素を**投げる**
-   （エラー文が Table 357 を名指している）ので、ここは
-   **測れない面で挙動が変わりうる**。変えるなら意図して変え、記録すること
-   （[[saturated-faces-cannot-carry-a-difference]]）
+3. 🔴 **受け皿は「リポジトリにある」だけで、writer からは届いていない。** §3.5 の
+   受け皿表の ✅ 6 個（`ContentStreamBuilder` / `StructTreeBuilder` / `TaggedStream` /
+   `buildType0Font` / `sniffFontProgram` / `PdfDocumentEditor`）は、**writer が
+   依存している `normativepdf@0.3.1` の公開表面に 1 つも無い**（`node_modules/normativepdf/dist/index.d.ts`
+   は 30 行・COS / パーサ / シリアライザ / 増分更新まで）。部品 4 と L2 は 2026-08-14 に
+   入ったが、0.3.1 の公開は 2026-08-13 で、**まだ載っていない**。
+   `lib/normativepdf/package.json` の版も 0.3.1 のまま上がっていない。
+
+   ⚠️ **表の ✅ は「作った」であって「使える」ではない**（[[shipped-is-not-used]]）。
+   L3' の型検査は現在この 5 件だけで落ちていた = **書いたコードの誤りではなく、
+   依存の順序**である。
+
+   **決定（2026-08-14）: normativepdf 0.4.0 を先に公開し、writer の dep を上げる。**
+   ローカル参照（`file:` / `npm link`）にしないのは、戻し忘れると
+   **公開版で壊れる**ため（家の作法 = リリース後は npx で公開版を叩く）。
+   0.4.0 に載せるのは 部品 4 + L2 + `PdfDocumentEditor.create()` + 下記 MCR で、
+   **L3' が要求する表面を 1 度に出し切る**（2 回目のリリースを挟まないため、
+   公開前に「L3' が何を呼ぶか」を数え終えてから版を切った）。
+
+4. ⚠️ **生成検体 9 本はすべて 1 ページ**（lock の `pageCount` 実測）。つまり
+   **構造要素がページをまたぐ経路（MCR 辞書・旧 `struct-tree.ts:299-305`）はオラクルが測っていない**。
+   normativepdf の `StructTreeBuilder` は 2 ページにまたがる要素を**投げて**いた
+   （エラー文が Table 357 を名指していた）ので、そのまま載せ替えると
+   **測れない面で挙動が静かに変わる**（[[saturated-faces-cannot-carry-a-difference]]）。
+
+   → **normativepdf 側に MCR（Table 357）を入れた**（0.4.0）。要素の内容項目が
+   2 ページ以上にまたがるかを**書く直前に走査して**形を決める（`/Pg` + 素の整数 /
+   MCR 辞書）ので、オーサリング層は「段落がページで割れた」ことを知らなくてよい。
+   MCR は**直接オブジェクト**で書く（Table 357 は辞書を要求しており、
+   内容項目 1 つに番号を 1 つ使う理由が無い）。合わせて `TaggedStream.artifact()` の
+   subtype 無しを **`BDC <<>>` から `BMC` へ**（Table 352 が 2 つの演算子を持つのは
+   プロパティリストの有無を分けるためで、空辞書は「何も持たないリスト」を宣言してしまう）。
+   コーパスに素材が無い面なので、テストは合成した検体で取ってある。
+
+   🔴 **この変更で 3 か所を踏んだ。同じ罠が下の L1 の ⚠️ に書いてあるのに踏んだ。**
+   `artifact|BMC|Artifact` で grep して「テストは subtype 付きの 1 本だけ」と判断したが、
+   拒否のほうを固定していたテスト（`what the builder refuses` の
+   "refuses content items of one element on two pages"）は**その語のどれにも当たらない**。
+   ホストの `npm test` で 1 件落ちて発覚した。さらに:
+
+   - `docs/ROADMAP.md` に「2 ページにまたがる要素は Table 357 を使えと言って拒否」という
+     **文**があった
+   - `src/struct/struct-tree.ts` の冒頭の「何を強制するか」一覧にも同じ趣旨が書いてあった
+
+   **教訓は「`tests/` も grep に含める」では足りない。** 変えるのは *挙動* なので、
+   探すべきは実装の語ではなく**旧挙動を述べているもの全部**（テスト名・拒否のメッセージ・
+   ROADMAP・モジュール冒頭のコメント）である。**文はテストが落ちないので、
+   放っておくと嘘が残る**。挙動を変えるときは「これは何を約束していたか」を先に列挙し、
+   その約束の文言で grep すること
+
+### L3' の着手分（2026-08-14・**未完・型検査は L3'.0 待ち**）
+
+`pdf-writer-mcp/src/services/` に 3 ファイル。**まだどこからも呼ばれていない**ので、
+`grep -rn "from 'pdf-lib'" src/` は 23 行のまま動いていない（[[shipped-is-not-used]] を
+自分で踏まないよう明記する）。
+
+| ファイル | 中身 |
+|---|---|
+| `cos.ts` | COS 値の短縮記法。判断は 1 つも入っていない。`textString` は ASCII ならリテラル・そうでなければ UTF-16BE + BOM（§7.9.2.2）で、**呼び出し側に選ばせない** |
+| `writer-doc.ts` | `WriterDocument`（ADR-0007 の (c)）+ `WriterPage`。描画 3 種 = `drawText` / `drawRectangle` / `drawLine` |
+| `font-embed.ts` | 標準 14（`@pdf-lib/standard-fonts` の AFM 直読み）と埋め込み Type0（`buildType0Font` + fontkit）。`/W`・記述子・`/ToUnicode` はここで作る |
+
+**旧実装の演算子列は実測してある**（`qpdf --filtered-stream-data`）。テキストは
+`q BT r g b rg /F n Tf 24 TL 1 0 0 1 x y Tm <hex> Tj T* ET Q` で、これは踏襲した。
+
+**意図して変えたもの（オラクルに差として出る。出たら「これ」と照合する）**:
+
+1. 🔴 **フォントのリソース名を 1 フォント 1 エントリにする。** 旧実装は `drawText` の
+   たびに pdf-lib の `setFont` を通り、**そのたびに乱数サフィックス付きの新しい鍵**を
+   作っていた（実測: 1 ページの見出し + 本文で `/NotoSansJP-Regular-7098480789` と
+   `-9742682568` の 2 エントリが同じフォントを指す）。同じものに違う名前を配ると、
+   読み手にはそれが同じフォントだとファイルから分からない
+2. **矩形を `re` で書く。** 旧実装は `translate → rotate(0) → skew(0)` の `cm` を 3 つ
+   書いてから `m`/`l` を 4 本並べていた。回転も傾斜も無い矩形に単位行列の `cm` を
+   2 つ書くのは**何もしない演算子**である（Table 58 の `re` が同じ図形を 1 つで表す）
+3. `/ExtGState` の空辞書と `/Annots` の空配列を書かない（旧実装は常に置いていた）
+4. `/Contents` を 1 要素の配列で包まない（Table 31 はストリームそのものを許す）
+5. `/ToUnicode` の CMap を自前で組む。**ダイジェストは sha256 しか見ない**ので、
+   ここの差は「正しいかどうか」を運ばない → 抽出結果を pdf-reader で読み戻して測ること
+
+⚠️ **記述子の数値は旧実装と一致することを先に確かめた**（Noto Sans JP のサブセットで
+`Ascent 1160 / Descent -288 / CapHeight 733 / XHeight 543 / FontBBox [-1002,-1048,2928,1808]`）。
+式（`値 × 1000 / unitsPerEm`）は推測ではなく、この照合で決めてある。
+
+**残り**: `struct-tree.ts` の載せ替え・`builder.ts` / `layout.ts` / `renderers` の接続・
+`color.ts` の `toPdfLibColor` 撤去・生成用の出口（`finalizePdf` 相当 = Info / XMP / `/ID` /
+ヘッダ版）・`page-ops.ts` のページ複写。
 
 ### L1 の第 1 手（色）の実測 — 2026-08-14
 

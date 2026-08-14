@@ -122,13 +122,12 @@ describe('what the builder refuses', () => {
     expect(() => new StructTreeBuilder().finish(makeSink())).toThrow(StructTreeError);
   });
 
-  it('refuses content items of one element on two pages (R-14.7.2-23)', () => {
-    const tree = new StructTreeBuilder();
-    const p = tree.element('P');
-    tree.stream(page(1)).contentItem(p, () => {});
-    tree.stream(page(2)).contentItem(p, () => {});
-    expect(() => tree.finish(makeSink())).toThrow(/R-14\.7\.2-23/);
-  });
+  // 🔴 "refuses content items of one element on two pages (R-14.7.2-23)" stood
+  // here until 0.4.0. That shape is no longer refused: it is written with the
+  // marked-content reference dictionaries of Table 357, which is what the old
+  // error message told the caller to use. The behaviour is now pinned by
+  // "an element whose content spans two pages" below — this comment stays so
+  // that the removal reads as a decision rather than a lost test.
 
   it('refuses an element that belongs to another builder', () => {
     const a = new StructTreeBuilder();
@@ -152,6 +151,75 @@ describe('artifacts and other non-structural marks', () => {
     expect(bytes).toContain('/Artifact <</Subtype /Pagination>> BDC');
     expect(bytes).toContain('/P <</MCID 0>> BDC');
     expect(bytes.match(/MCID/g)?.length).toBe(1);
+  });
+
+  /**
+   * Table 352 has two operators for a reason: BDC takes a property list, BMC
+   * does not. An empty dictionary is a list that carries no property, so
+   * writing `BDC <<>>` says something the file does not mean.
+   */
+  it('marks an artifact with no subtype using BMC, not BDC with an empty list', () => {
+    const tree = new StructTreeBuilder();
+    const stream = tree.stream(page(1));
+    stream.artifact((c) => c.op('re', int(0), int(0), int(10), int(10)).op('f'));
+    const bytes = latin1(stream.finish());
+    expect(bytes).toContain('/Artifact BMC');
+    expect(bytes).not.toContain('<<>>');
+  });
+});
+
+/**
+ * Content items that sit on more than one page.
+ *
+ * R-14.7.2-23 gives an element one `/Pg`, so a bare integer in `/K` names a
+ * sequence whose page comes from that entry. A paragraph broken across a page
+ * has items on two of them, and Table 357's marked-content reference
+ * dictionary is what carries the page per item.
+ *
+ * ⚠️ The corpus cannot measure this: every specimen pdf-writer-mcp's oracle
+ * generates is one page (measured 2026-08-14), so nothing downstream would
+ * notice if this shape were wrong.
+ */
+describe('an element whose content spans two pages', () => {
+  const build = () => {
+    const tree = new StructTreeBuilder();
+    const p = tree.element('P');
+    tree.stream(page(1)).contentItem(p, () => {});
+    tree.stream(page(2)).contentItem(p, () => {});
+    const sink = makeSink();
+    const built = tree.finish(sink);
+    const root = sink.objects.get(built.structTreeRoot.objectNumber);
+    return { sink, pDict: sink.objects.get(refOf(get(root, 'K'))) };
+  };
+
+  it('writes a marked-content reference for each item instead of a bare integer', () => {
+    const { pDict } = build();
+    const kids = items(get(pDict, 'K'));
+    expect(kids).toHaveLength(2);
+    expect(get(kids[0], 'Type')).toEqual(name('MCR'));
+    expect(refOf(get(kids[0], 'Pg'))).toBe(901);
+    expect(get(kids[0], 'MCID')).toEqual(int(0));
+    expect(refOf(get(kids[1], 'Pg'))).toBe(902);
+    expect(get(kids[1], 'MCID')).toEqual(int(0));
+  });
+
+  it('omits /Pg on the element, because no single page is the one', () => {
+    expect(get(build().pDict, 'Pg')).toBeUndefined();
+  });
+
+  it('still keeps /Pg and bare integers when everything is on one page', () => {
+    const tree = new StructTreeBuilder();
+    const p = tree.element('P');
+    const stream = tree.stream(page(4));
+    stream.contentItem(p, () => {});
+    stream.contentItem(p, () => {});
+    const sink = makeSink();
+    const built = tree.finish(sink);
+    const pDict = sink.objects.get(
+      refOf(get(sink.objects.get(built.structTreeRoot.objectNumber), 'K')),
+    );
+    expect(items(get(pDict, 'K'))).toEqual([int(0), int(1)]);
+    expect(refOf(get(pDict, 'Pg'))).toBe(904);
   });
 });
 

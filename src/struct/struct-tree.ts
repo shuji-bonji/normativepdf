@@ -32,7 +32,10 @@
  * - R-14.7.2-21   every structure element's `/P` is the parent — written here,
  *   never by the caller, so it cannot disagree with `/K`.
  * - R-14.7.2-23   `/Pg` is required when `/K` holds integers; it follows from
- *   the stream the content item was written into.
+ *   the stream the content item was written into. An element whose items are on
+ *   more than one page gets Table 357 references instead — one `/Pg` cannot
+ *   name two pages, and an authoring layer should not have to know that a
+ *   paragraph broke across a page changes the shape underneath it.
  * - R-14.7.5.4-9/-10/-11 `/ParentTreeNextKey` shall exceed every key in use,
  *   and keys are handed out in order.
  * - R-14.7.5.4-20 at most one of `/StructParent` / `/StructParents` per object.
@@ -163,11 +166,15 @@ export class TaggedStream {
    * and explicitly permits non-structural marked content.
    */
   artifact(draw: (content: ContentStreamBuilder) => void, subtype?: string): this {
-    this.content.op(
-      'BDC',
-      name('Artifact'),
-      subtype === undefined ? dict([]) : dict([['Subtype', name(subtype)]]),
-    );
+    // Table 352 gives BMC for a sequence with no property list and BDC for one
+    // with. An empty dictionary is a property list that says nothing, so
+    // writing BDC <<>> would claim a list that carries no property — BMC is
+    // what the specification has for exactly this case.
+    if (subtype === undefined) {
+      this.content.op('BMC', name('Artifact'));
+    } else {
+      this.content.op('BDC', name('Artifact'), dict([['Subtype', name(subtype)]]));
+    }
     draw(this.content);
     this.content.op('EMC');
     return this;
@@ -267,27 +274,46 @@ export class StructTreeBuilder {
       entries.set('S', name(element.type));
       entries.set('P', element.parent === null ? rootRef : (refs.get(element.parent) as CosRef));
 
+      // R-14.7.2-23 gives an element **one** /Pg, so a bare integer content item
+      // only says which sequence it is — the page comes from /Pg. An element
+      // whose items sit on more than one page therefore cannot use bare
+      // integers for all of them; Table 357's marked-content reference
+      // dictionary carries its own /Pg and is what that case is for.
+      //
+      // Which shape applies is decided by walking the items first, rather than
+      // by the caller: a paragraph that happens to break across a page is an
+      // ordinary thing for an authoring layer to produce, and it should not
+      // have to know that the shape changes underneath it.
+      const contentItems = element.children.filter(
+        (child): child is { mcid: number; stream: TaggedStream } =>
+          !(child instanceof StructElement),
+      );
+      const pagesUsed = new Set(contentItems.map((item) => item.stream.page.objectNumber));
+      const spansPages = pagesUsed.size > 1;
+
       const kids: CosObject[] = [];
-      let pageOfIntegerKids: CosRef | null = null;
       for (const child of element.children) {
         if (child instanceof StructElement) {
           kids.push(refs.get(child) as CosRef);
           write(child);
           continue;
         }
-        kids.push(int(child.mcid));
-        if (pageOfIntegerKids === null) {
-          pageOfIntegerKids = child.stream.page;
-        } else if (pageOfIntegerKids.objectNumber !== child.stream.page.objectNumber) {
-          // R-14.7.2-23 gives one /Pg per element. Content items on a second
-          // page need a marked-content reference dictionary (Table 357) that
-          // carries its own /Pg — refused rather than written wrongly.
-          throw new StructTreeError(
-            `structure element /${element.type} has content items on two different pages; /Pg names one page (R-14.7.2-23). Split the element, or use a marked-content reference dictionary (Table 357)`,
-          );
-        }
+        kids.push(
+          spansPages
+            ? // Table 357. Written as a direct object: the clause requires the
+              // dictionary, not an indirect one, and an object number per
+              // content item would be spent for nothing.
+              dict([
+                ['Type', name('MCR')],
+                ['Pg', child.stream.page],
+                ['MCID', int(child.mcid)],
+              ])
+            : int(child.mcid),
+        );
       }
-      if (pageOfIntegerKids !== null) entries.set('Pg', pageOfIntegerKids);
+      if (!spansPages && contentItems.length > 0) {
+        entries.set('Pg', (contentItems[0] as { stream: TaggedStream }).stream.page);
+      }
       if (kids.length === 1) entries.set('K', kids[0] as CosObject);
       else if (kids.length > 1) entries.set('K', { kind: 'array', items: kids });
 
