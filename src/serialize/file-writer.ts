@@ -23,7 +23,7 @@
 
 import type { CosDict, CosObject } from '../cos/types.js';
 import { dictGetRaw } from '../cos/types.js';
-import type { PdfDocument } from '../file/file-parser.js';
+import { type PdfDocument, TruncatedHistoryError } from '../file/file-parser.js';
 import type { CompressedPlacement } from './object-stream-writer.js';
 import { buildObjectStream, partitionForObjectStream } from './object-stream-writer.js';
 import { ByteWriter, writeIndirectObject, writeObject } from './object-writer.js';
@@ -408,8 +408,18 @@ export async function collectObjects(doc: PdfDocument): Promise<WritableObject[]
   return collected.sort((a, b) => a.objectNumber - b.objectNumber);
 }
 
-/** Read a document and write it back out as a single-revision PDF. */
+/**
+ * Read a document and write it back out as a single-revision PDF.
+ *
+ * Refuses a document whose `/Prev` chain could not be walked to the end: the
+ * objects defined in the revisions that were not read are absent from `xref`,
+ * so a rewrite would emit a smaller file with references pointing at nothing.
+ * An incremental update is the operation such a file can still take.
+ */
 export async function rewrite(doc: PdfDocument): Promise<Uint8Array> {
+  if (doc.chainStop.kind !== 'complete') {
+    throw new TruncatedHistoryError(doc.chainStop);
+  }
   const objects = await collectObjects(doc);
   return writeFile(objects, doc.trailer, { version: doc.headerVersion });
 }

@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { dictGet } from '../src/cos/types.js';
-import { parsePdf } from '../src/index.js';
+import { parsePdf, rewrite, TruncatedHistoryError } from '../src/index.js';
 import { buildPdf } from './helpers/build-pdf.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -247,7 +247,7 @@ describe('tail structure (§7.5.5)', () => {
     await expect(parsePdf(b.bytes)).rejects.toThrow(/§7\.5\.8\.1/);
   });
 
-  it('rejects a cyclic Prev chain instead of looping forever', async () => {
+  it('reports a cyclic Prev chain rather than looping forever', async () => {
     // Build manually: xref section whose trailer Prev points at itself.
     const header = '%PDF-1.7\n';
     const cat = CATALOG;
@@ -258,6 +258,16 @@ describe('tail structure (§7.5.5)', () => {
       `xref\n0 2\n0000000000 65535 f \n${pad(header.length, 10)} 00000 n \n` +
       `trailer\n<< /Size 2 /Root 1 0 R /Prev ${xrefOff} >>\n` +
       `startxref\n${xrefOff}\n%%EOF\n`;
-    await expect(parsePdf(enc(text))).rejects.toThrow(/cyclic Prev/);
+
+    // 🔴 This used to reject. The guarantee the name was about — the walk
+    // terminates — is unchanged; what changed is that terminating is now
+    // reported instead of refused, for the same reason `/Prev 0` is
+    // (`truncated-history.test.ts`): the newest section is perfectly readable,
+    // and a file that can still be appended to should not be refused outright.
+    // Nothing is lost silently, because the exits that would drop the unread
+    // revisions refuse instead — asserted below.
+    const doc = await parsePdf(enc(text));
+    expect(doc.chainStop).toEqual({ kind: 'cyclic', offset: xrefOff });
+    await expect(rewrite(doc)).rejects.toThrow(TruncatedHistoryError);
   });
 });

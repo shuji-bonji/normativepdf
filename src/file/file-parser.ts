@@ -98,6 +98,29 @@ export interface XrefSection {
 }
 
 /** A walked cross-reference chain, newest section first (§7.5.4/§7.5.6). */
+/**
+ * Why the walk up the `/Prev` chain stopped.
+ *
+ * 🔴 **Three values, not two.** "Reached the end" and "could not go further"
+ * are different facts, and collapsing them turns a file whose history is
+ * unreadable into one that appears to have none. `dss-pades-5sigs-doctimestamp.pdf`
+ * is the standing example: eight revisions and five signatures, with a trailer
+ * carrying `/Prev 0`. Swallowing that zero reports one revision and a complete
+ * chain; throwing on it refuses a file that is perfectly appendable. Both
+ * answers are wrong in the same place, so the reason travels with the result.
+ */
+export type XrefChainStop =
+  /** A trailer with no `/Prev`: the chain ended where it was meant to. */
+  | { readonly kind: 'complete' }
+  /** `/Prev 0` — no section begins at the origin, so this points nowhere. */
+  | { readonly kind: 'prev-zero'; readonly offset: number }
+  /** `/Prev` led somewhere that does not hold a cross-reference section. */
+  | { readonly kind: 'unreadable'; readonly offset: number; readonly reason: string }
+  /** `/Prev` led back to a section already read (§7.5.5 Table 15). */
+  | { readonly kind: 'cyclic'; readonly offset: number }
+  /** `/Prev` was not a direct integer (§7.5.5 Table 15). */
+  | { readonly kind: 'malformed'; readonly offset: number };
+
 export interface XrefChain {
   /** Byte index of the PERCENT SIGN of %PDF- — the offset origin (§7.5.2). */
   readonly origin: number;
@@ -105,7 +128,40 @@ export interface XrefChain {
   readonly headerVersion: string;
   /** The offset the final startxref carried (§7.5.5). */
   readonly startxref: number;
+  /** The sections that could be read, newest first. */
   readonly sections: readonly XrefSection[];
+  /**
+   * Why the walk ended. Anything other than `complete` means older revisions
+   * exist that this parser could not read — the objects they define are
+   * missing from `sections`, so the document is safe to append to and unsafe
+   * to rewrite whole.
+   */
+  readonly stop: XrefChainStop;
+}
+
+/**
+ * Raised when a whole-file rewrite is asked of a document whose history could
+ * not be read to the end.
+ *
+ * The two exits differ here and the difference matters: appending leaves every
+ * earlier revision byte for byte, so an unreadable one costs nothing, while
+ * rewriting emits only the objects that were found. Refusing is the only
+ * honest answer — the alternative is a smaller file that lost objects nobody
+ * was told about.
+ */
+export class TruncatedHistoryError extends Error {
+  readonly stop: XrefChainStop;
+
+  constructor(stop: XrefChainStop) {
+    const where = 'offset' in stop ? ` at offset ${stop.offset}` : '';
+    super(
+      `the /Prev chain could not be walked to the end (${stop.kind}${where}), so older revisions ` +
+        'hold objects this document has not seen; rewriting the file whole would drop them. ' +
+        'Append an incremental update instead (§7.5.6), which leaves the earlier revisions in place.',
+    );
+    this.name = 'TruncatedHistoryError';
+    this.stop = stop;
+  }
 }
 
 const HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
@@ -133,6 +189,15 @@ export class PdfDocument {
   readonly trailer: CosDict;
   /** Merged cross-reference table — newest section wins per object number (§7.5.4/§7.5.6). */
   readonly xref: ReadonlyMap<number, XrefEntry>;
+  /**
+   * Why the walk up the `/Prev` chain stopped (§7.5.6).
+   *
+   * Anything other than `complete` means revisions exist below the ones read
+   * here, and the objects they define are absent from `xref`. Appending to
+   * such a file is safe — the old bytes stay where they are — while rewriting
+   * it whole would drop what was never seen.
+   */
+  readonly chainStop: XrefChainStop;
 
   readonly #cache = new Map<string, CosObject>();
   readonly #inFlight = new Set<string>();
@@ -145,6 +210,7 @@ export class PdfDocument {
     version: string,
     trailer: CosDict,
     xref: ReadonlyMap<number, XrefEntry>,
+    chainStop: XrefChainStop = { kind: 'complete' },
   ) {
     this.bytes = bytes;
     this.origin = origin;
@@ -152,6 +218,7 @@ export class PdfDocument {
     this.version = version;
     this.trailer = trailer;
     this.xref = xref;
+    this.chainStop = chainStop;
   }
 
   /**
@@ -345,23 +412,53 @@ export async function readXrefChain(bytes: Uint8Array): Promise<XrefChain> {
   const sections: XrefSection[] = [];
   const visited = new Set<number>();
   let offset: number | undefined = startxref;
+  let stop: XrefChainStop = { kind: 'complete' };
+
   while (offset !== undefined) {
     if (visited.has(offset)) {
-      throw new ParseError(`cyclic Prev chain revisits offset ${offset} (§7.5.5 Table 15)`, offset);
+      stop = { kind: 'cyclic', offset };
+      break;
     }
     visited.add(offset);
-    const section = await parseSection(bytes, origin, offset);
+
+    let section: XrefSection;
+    try {
+      section = await parseSection(bytes, origin, offset);
+    } catch (error) {
+      // The newest section is the file. Without it there is no document to
+      // hand back, so that one still refuses. An older one failing means the
+      // history is unreadable, which is a fact about the file, not a reason to
+      // refuse it: writer 0.19.0 appends to ten such specimens today by
+      // reading the newest section alone.
+      if (sections.length === 0) {
+        throw error;
+      }
+      stop = {
+        kind: 'unreadable',
+        offset,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+      break;
+    }
+
     sections.push(section);
     const prev = dictGet(section.trailer, 'Prev');
     if (prev === undefined) {
       offset = undefined;
-    } else if (prev.kind === 'integer' && prev.value >= 0) {
+    } else if (prev.kind === 'integer' && prev.value > 0) {
       offset = prev.value;
+    } else if (prev.kind === 'integer' && prev.value === 0) {
+      // §7.5.2 puts the header at the origin, so offset 0 never addresses a
+      // cross-reference section. The entry says "there is more history" and
+      // fails to say where.
+      stop = { kind: 'prev-zero', offset };
+      break;
     } else {
-      throw new ParseError('trailer Prev shall be a direct integer (§7.5.5 Table 15)', offset);
+      stop = { kind: 'malformed', offset };
+      break;
     }
   }
-  return { origin, headerVersion, startxref, sections };
+  return { origin, headerVersion, startxref, sections, stop };
 }
 
 /**
@@ -386,7 +483,7 @@ export async function readXrefSectionAt(
 
 /** Parse a complete PDF file (classic tables, cross-reference streams, hybrid files). */
 export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
-  const { origin, headerVersion: version, startxref, sections } = await readXrefChain(bytes);
+  const { origin, headerVersion: version, startxref, sections, stop } = await readXrefChain(bytes);
 
   const newest = sections[0];
   if (newest === undefined) {
@@ -417,7 +514,7 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
     }
   }
 
-  const doc = new PdfDocument(bytes, origin, version, version, newest.trailer, merged);
+  const doc = new PdfDocument(bytes, origin, version, version, newest.trailer, merged, stop);
 
   // §7.7.2 Table 29 Version: "The version of the PDF specification to which
   // the document conforms … if later than the version specified in the
@@ -428,7 +525,7 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
   // header 1.7 and catalog /Version /2.0.
   const catalogVersion = await readCatalogVersion(doc);
   if (catalogVersion !== undefined && isLaterVersion(catalogVersion, version)) {
-    return new PdfDocument(bytes, origin, version, catalogVersion, newest.trailer, merged);
+    return new PdfDocument(bytes, origin, version, catalogVersion, newest.trailer, merged, stop);
   }
   return doc;
 }

@@ -46,6 +46,7 @@ export {
 } from './doc/page-tree.js';
 export type {
   XrefChain,
+  XrefChainStop,
   XrefCompressed,
   XrefEntry,
   XrefFree,
@@ -53,7 +54,13 @@ export type {
   XrefSection,
   XrefUnknown,
 } from './file/file-parser.js';
-export { PdfDocument, parsePdf, readXrefChain, readXrefSectionAt } from './file/file-parser.js';
+export {
+  PdfDocument,
+  parsePdf,
+  readXrefChain,
+  readXrefSectionAt,
+  TruncatedHistoryError,
+} from './file/file-parser.js';
 export type { ParsedObjectStream } from './file/object-stream.js';
 export { loadObjectStream, objectFromStream } from './file/object-stream.js';
 export { type DecodeOptions, decodeStream } from './filter/decode.js';
