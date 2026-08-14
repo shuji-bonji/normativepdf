@@ -1,61 +1,16 @@
 /**
- * File-structure tests (§7.5). Fixtures are assembled with computed
- * offsets so every xref entry is exact by construction — hand-written
- * offsets would rot the moment a fixture changes.
+ * File-structure tests (§7.5). The fixture builder lives in
+ * `helpers/build-pdf.ts` — it is shared with the page-tree fixtures, which
+ * need object numbers that do not follow the order the objects are written in.
  */
 
 import { describe, expect, it } from 'vitest';
 import { dictGet } from '../src/cos/types.js';
 import { parsePdf } from '../src/index.js';
+import { buildPdf } from './helpers/build-pdf.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const pad = (n: number, w: number) => n.toString().padStart(w, '0');
-
-interface BuildOptions {
-  readonly junkBefore?: string;
-  readonly header?: string;
-  readonly entryEol?: string; // 2-char entry EOL: ' \r' | ' \n' | '\r\n'
-  readonly trailerSource?: (size: number) => string;
-  readonly startxrefOverride?: number;
-  readonly tailSource?: (startxref: number) => string;
-}
-
-interface BuiltPdf {
-  readonly bytes: Uint8Array;
-  readonly text: string;
-  readonly xrefOffset: number;
-  readonly objectOffsets: readonly number[];
-}
-
-/** Assemble a classic-xref PDF; all offsets relative to the %PDF- origin. */
-function buildPdf(objectSources: readonly string[], opts: BuildOptions = {}): BuiltPdf {
-  const junk = opts.junkBefore ?? '';
-  const header = opts.header ?? '%PDF-1.7\n';
-  const eol = opts.entryEol ?? ' \n';
-
-  let rel = header.length;
-  const objectOffsets: number[] = [];
-  let body = '';
-  for (const src of objectSources) {
-    objectOffsets.push(rel);
-    body += src;
-    rel += src.length;
-  }
-
-  const xrefOffset = rel;
-  const size = objectSources.length + 1;
-  let xref = `xref\n0 ${size}\n0000000000 65535 f${eol}`;
-  for (const off of objectOffsets) {
-    xref += `${pad(off, 10)} ${pad(0, 5)} n${eol}`;
-  }
-
-  const trailer = opts.trailerSource?.(size) ?? `trailer\n<< /Size ${size} /Root 1 0 R >>\n`;
-  const startxref = opts.startxrefOverride ?? xrefOffset;
-  const tail = opts.tailSource?.(startxref) ?? `startxref\n${startxref}\n%%EOF\n`;
-
-  const text = junk + header + body + xref + trailer + tail;
-  return { bytes: enc(text), text, xrefOffset, objectOffsets };
-}
 
 const CATALOG = '1 0 obj << /Type /Catalog >> endobj\n';
 const STRING_OBJ = '2 0 obj (Brillig) endobj\n';
