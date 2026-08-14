@@ -160,6 +160,27 @@ async function roundTrip(bytes) {
   if (dictGetRaw(source.trailer, 'Encrypt') !== undefined) {
     return { outcome: 'not-measurable', reason: 'encrypted (§7.6; decryption not implemented)' };
   }
+  // 🔴 A document whose /Prev chain could not be walked to the end is one the
+  // library refuses to rewrite: `rewrite` and `PdfDocumentEditor.save` both
+  // throw TruncatedHistoryError, because the objects defined in the revisions
+  // that were not read are absent from `xref` and writing the file whole drops
+  // them. This gate used to reach past that refusal — it calls collectObjects
+  // and writeFile directly — and so produced exactly the damage the refusal
+  // exists to prevent: `6-1-4-t01-fail-a.pdf` declares /Size 15, has 3 xref
+  // entries, and came out as 597 bytes holding 2 objects, with the page tree
+  // pointing at an object that no longer exists (qpdf: "operation for
+  // dictionary attempted on object of type null"). Measured 2026-08-14.
+  //
+  // It appeared as an improvement: the specimen became parseable when
+  // readXrefChain started returning the stop as a value, so the gate counted
+  // one more round-trip (2881 → 2882) while quietly writing a broken file.
+  // A gate that reaches past the API it is measuring is not measuring it.
+  if (source.chainStop.kind !== 'complete') {
+    return {
+      outcome: 'not-measurable',
+      reason: `/Prev chain is ${source.chainStop.kind}; the library refuses to rewrite it (§7.5.6)`,
+    };
+  }
 
   // Collecting and writing are separated so a failure names the side that
   // failed. `parsePdf` only resolves the catalog, so a specimen with a broken

@@ -595,6 +595,45 @@ gate の判定は「xref に載っている in-use / compressed が全部解決�
 もう片方の数字は動いたまま記録されず、次に誰かが回したとき
 「いつ・何で動いたか」を後から測り直すことになる。
 
+### 🔴 往復の +1 は改善ではなく、門番が API を迂回していた（2026-08-14・CI が捕まえた）
+
+`roundtrip:survey` も 2881 → **2882** に増えた。同じ形の「改善」に見えたので
+`baselineRoundTrip` を 2882 に上げようとしたが、**GitHub Actions が赤で止めた**:
+
+```
+qpdf --check (source vs rewrite): 2881/2882 introduced nothing new
+    PDF_A-1b/…/6-1-4-t01-fail-a.pdf — WARNING: object 4 0: operation for dictionary
+    attempted on object of type null: returning false for a key containment request
+NG  the rewrite introduced complaints the source did not have — ADR-0004 §2
+```
+
+**+1 の正体は、パース率の +1 と同じ検体だった。** ただし意味が逆である:
+
+- `scripts/roundtrip-corpus.mjs` は `collectObjects` + `writeFile` を**直接**呼んでおり、
+  `rewrite()` を通っていない。つまり **`TruncatedHistoryError` の門を迂回していた**
+- この検体は `/Prev` チェーンが読めない（`chainStop = unreadable`）。
+  `rewrite` と `PdfDocumentEditor.save` は**設計として拒否する** ——
+  読めなかったリビジョンが定義するオブジェクトは `xref` に無く、全書き直しは
+  それを黙って落とすため
+- 迂回した結果、**まさにその拒否が防いでいた壊れ方**が出た。実測:
+  trailer は `/Size 15` を宣言、`xref` は 3 エントリ、書けたのは
+  **597 バイト・オブジェクト 2 本**。ページツリーが存在しないオブジェクトを指す
+- L2 で `readXrefChain` が打ち切りを値で返すようになった瞬間、この検体は
+  「読める」側に移り、**門番は 1 件多く往復に成功したことにして、壊れたファイルを書いていた**
+
+**直し**: 門番は `chainStop !== 'complete'` を `not-measurable` に分類する
+（拒否する API を迂回して測らない）。基準値は **2881 に戻す**。
+
+⚠️ **ローカルは緑だった。** ホストの qpdf 12.4.0 はこの警告を出さず、
+CI と サンドボックスの qpdf 10.6.3 は出す。**版が新しいほうが厳しいとは限らない**
+（5 署名検体では逆に qpdf 12 が厳しかった）。
+
+⚠️ **私はこの +1 を「0.3.1 の時点から実態とずれていた基準値」と結論しかけた。**
+`rewrite` を使った版間 A/B で「3 版とも同じ集合」と出たのを
+「版差が無い = 基準値が古い」と読んだが、正しい読みは
+**「`rewrite` は 3 版とも拒否している = 門番だけが通している」**だった。
+同じデータから逆の結論が出せる形だったのに、片方しか検討しなかった。
+
 ### ⚠️ 版のずれ（2026-08-14 実測・今回は触らないと決めた）
 
 normativepdf に依存しているのは 2 つで、**版が揃っていない**:
