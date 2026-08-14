@@ -3,6 +3,14 @@
  * Stage 0 surface: COS object model + lexical layer.
  */
 
+export type {
+  ConformanceLevel,
+  Declaration,
+  DeclarationEvidence,
+  DocumentFacts,
+  UnmetRequirement,
+} from './conformance/declare.js';
+export { DeclarationRefused, declareConformance } from './conformance/declare.js';
 export type { ContentContext } from './content/content-stream.js';
 export { ContentStreamBuilder, ContentStreamError } from './content/content-stream.js';
 export type {

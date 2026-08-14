@@ -182,7 +182,27 @@ flowchart LR
   - **実測 15/15**（ビルド済み JS 実走）・`tests/struct-tree.test.ts` は **13 ケース**（ホスト実走 233/233 で緑）。
         **T-3 = MCID と `/K` をずらすと 1 件・入れ子検査を外すと 1 件・
         `ParentTreeNextKey` を 1 減らすと 2 件落ちる**
-- [ ] XMP・OutputIntent・catalog（適合宣言は要件検査と同関数に = DESIGN §3）
+- [x] **XMP・OutputIntent・catalog（2026-08-14）** — `src/conformance/declare.ts`。
+      **DESIGN §3 のとおり「宣言を書く経路」を独立させなかった**: `declareConformance(level, facts)` が
+      要件を検査し、満たさなければ **XMP を作らずに `DeclarationRefused` を投げる**（不足は 1 件ずつでなく
+      **全部まとめて**返す — 1 件ずつ直させると文書を要件の数だけ作り直すことになる）
+  - **レベルによって言えることの強さが違うので、そこを結果に出す**。PDF/UA-1（ISO 14289-1）は
+        **corpus にあるので条文で検査する** = R-7.1-12（dc:title）/ R-7.1-15（DisplayDocTitle true）/
+        R-7.1-18（Suspects false）/ R-7.1-1（構造木なしでは成立しない）/ R-7.2-5（自然言語）。
+        **PDF/A（ISO 19005）は corpus 外**（`coverage.gaps`）なので条文に紐づけられない →
+        検査するのは**構造的前提**で、**`PRE-*` と名付けて条項番号に見せない**
+        （OutputIntent + DestOutputProfile / 非暗号化 / `/ID` / -3 と -4f は `/AFRelationship` /
+        -4 は `/Info` なし・添付なし）。`evidence.decidedBy` は常に veraPDF を名指す
+  - **`evidence.unchecked` は空にならない** — フォント埋め込み・色空間・透明度・読み上げ順序は
+        文書の骨格からは見えない。**検査したものだけを並べた結果は健康診断書に読めてしまう**ので、
+        見ていないものを必ず一緒に返す
+  - 🔴 **実測で裏を取った**: UC オラクルの `conformance-attach-pdfa4-bare` は
+        「添付を持つ文書に素の `pdfa-4` を宣言した」検体で、**veraPDF が 108/109 で落とす**
+        （`ISO 19005-4:2020 6.9-3`）。この関数は**その宣言を書く前に `PRE-NOATTACHMENTS` で拒み、
+        `pdfa-4f` を名指す**。DESIGN §3 が防ぎたかった事故の実例が手元にあり、実際に止まる
+  - **実測 24/24**（ビルド済み JS 実走）・`tests/declare.test.ts` は 18 ケース（ホスト実走待ち）。
+        **T-3 = 検査を全部通す（＝宣言だけ書く実装に戻す）と 10 件・`unchecked` を空にすると 1 件・
+        `PRE-NOATTACHMENTS` を外すと 1 件落ちる**
 - [ ] **受入: pdf-lib 撤去 + UC 回帰全緑 + PDF/A-3b COMPLIANT**
 - [ ] PDF family へ取り込み（writer が第一利用者・自身でコントリビュート）
 
