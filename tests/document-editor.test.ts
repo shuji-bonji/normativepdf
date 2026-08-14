@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CosObject } from '../src/cos/types.js';
 import { dictGet } from '../src/cos/types.js';
-import { PdfDocumentEditor, parsePdf, rewrite } from '../src/index.js';
+import { checkPageTree, PdfDocumentEditor, parsePdf, rewrite } from '../src/index.js';
 import { buildPdf, obj } from './helpers/build-pdf.js';
 import { PAGE_TREES } from './helpers/page-trees.js';
 
@@ -191,5 +191,124 @@ describe('reading through the overlay', () => {
   it('resolve passes a direct value through untouched', async () => {
     const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
     expect(await editor.resolve(name('Direct'))).toEqual(name('Direct'));
+  });
+});
+
+/**
+ * The container reached from empty rather than from bytes.
+ *
+ * The generation path of a writer has no input file, so `open` cannot serve
+ * it. What `create` has to produce is not "some PDF" but the exact state the
+ * rest of this file already assumes: a catalog Table 29 accepts, a root page
+ * node whose `/Count` already agrees with its `/Kids`, and a `/Size` that
+ * `allocate` can use as its floor.
+ */
+describe('a document created from empty', () => {
+  it('holds the two objects §7.7 requires before anything can be attached', async () => {
+    const doc = PdfDocumentEditor.create();
+    const catalog = await doc.getCatalog();
+    expect(dictGet(catalog, 'Type')).toEqual(name('Catalog'));
+
+    const pages = await doc.resolve(dictGet(catalog, 'Pages') as CosObject);
+    expect(dictGet(pages, 'Type')).toEqual(name('Pages'));
+    expect(dictGet(pages, 'Kids')).toEqual({ kind: 'array', items: [] });
+    expect(dictGet(pages, 'Count')).toEqual({ kind: 'integer', value: 0 });
+  });
+
+  it('says it was not opened, so callers can tell the two apart', () => {
+    expect(PdfDocumentEditor.create().opened).toBe(false);
+  });
+
+  it('starts with an empty tree that already satisfies §7.7.3', async () => {
+    const doc = PdfDocumentEditor.create();
+    const tree = await doc.pageTree();
+    expect(tree.reached).toBe(true);
+    expect(tree.pages).toEqual([]);
+    expect(tree.nodes).toHaveLength(1);
+    expect(await checkPageTree(doc, tree)).toEqual([]);
+  });
+
+  /**
+   * The floor matters here for the same reason it matters on a truncated
+   * history: `allocate` must not hand back a number something already holds.
+   * On a created document the only holders are the catalog and the root node,
+   * and they are in the overlay rather than in `xref`.
+   */
+  it('allocates above the catalog and the root page node', async () => {
+    const doc = PdfDocumentEditor.create();
+    expect((await doc.allocate({ kind: 'null' })).objectNumber).toBe(3);
+    expect((await doc.allocate({ kind: 'null' })).objectNumber).toBe(4);
+  });
+
+  it('saves a file the parser reads back as a zero-page document', async () => {
+    const bytes = await PdfDocumentEditor.create().save();
+    const back = PdfDocumentEditor.of(await parsePdf(bytes));
+    const tree = await back.pageTree();
+    expect(tree.reached).toBe(true);
+    expect(tree.pages).toEqual([]);
+    expect(dictGet(await back.getCatalog(), 'Type')).toEqual(name('Catalog'));
+  });
+
+  it('writes the header version it was asked for (§7.5.2)', async () => {
+    const header = (bytes: Uint8Array): string => new TextDecoder().decode(bytes.slice(0, 8));
+    expect(header(await PdfDocumentEditor.create().save())).toBe('%PDF-1.7');
+    expect(header(await PdfDocumentEditor.create({ version: '2.0' }).save())).toBe('%PDF-2.0');
+  });
+
+  it('refuses a header version §7.5.2 does not allow', () => {
+    expect(() => PdfDocumentEditor.create({ version: '3.0' })).toThrow(RangeError);
+    expect(() => PdfDocumentEditor.create({ version: '1.10' })).toThrow(RangeError);
+  });
+
+  /**
+   * §7.5.6 defines an incremental update as a section appended to the file it
+   * updates. There is no such file, so this is refused rather than producing
+   * a revision appended to nothing.
+   */
+  it('refuses an incremental update, having no earlier bytes to append to', async () => {
+    const doc = PdfDocumentEditor.create();
+    doc.set(3, name('Anything'));
+    await expect(doc.appendUpdate()).rejects.toThrow(/§7\.5\.6/);
+  });
+
+  it('carries an added page through save, with /Count recomputed', async () => {
+    const doc = PdfDocumentEditor.create();
+    const pagesRef = PdfDocumentEditor.rootPagesRef;
+    const pageRef = await doc.allocate({
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        ['Type', name('Page')],
+        ['Parent', pagesRef],
+        ['Resources', { kind: 'dict', entries: new Map() }],
+        [
+          'MediaBox',
+          {
+            kind: 'array',
+            items: [
+              { kind: 'integer', value: 0 },
+              { kind: 'integer', value: 0 },
+              { kind: 'integer', value: 595 },
+              { kind: 'integer', value: 842 },
+            ],
+          },
+        ],
+      ]),
+    });
+    // /Count is left at 0 on purpose: R-7.7.3.2-8 makes keeping it right the
+    // writer's job, so the container has to fix it rather than the caller.
+    doc.set(pagesRef.objectNumber, {
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        ['Type', name('Pages')],
+        ['Kids', { kind: 'array', items: [pageRef] }],
+        ['Count', { kind: 'integer', value: 0 }],
+      ]),
+    });
+
+    const back = PdfDocumentEditor.of(await parsePdf(await doc.save()));
+    const tree = await back.pageTree();
+    expect(tree.pages).toHaveLength(1);
+    const root = await back.resolve(dictGet(await back.getCatalog(), 'Pages') as CosObject);
+    expect(dictGet(root, 'Count')).toEqual({ kind: 'integer', value: 1 });
   });
 });

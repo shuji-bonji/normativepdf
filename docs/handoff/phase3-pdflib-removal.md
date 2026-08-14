@@ -227,8 +227,53 @@ L2 はライブラリ側の前進であって、撤去の進捗ではない。**
 3. **ページ複写** — オブジェクトグラフを辿って番号を振り直す。2 呼び出し。
    ⚠️ **`allocate` の採番規則がそのまま効く**（`/Size` を下限にする = [[read-range-is-not-the-whole-file]]）
 
-⚠️ **着手前に数えること**: 生成パスが `PDFPage` の何を使っているか
-（`getSize` 以外に何があるか）。型注釈は 9 ファイルに出るが、**呼んでいるメソッドは数えていない**。
+### 数えた（2026-08-14・着手直前）
+
+生成パス = `builder.ts` の到達閉包 + **コールバックで注入される `renderers/{text,table,markdown}.ts`**
+（静的な import グラフには出ない — `RenderFn` として `handlers.ts` から渡る）。
+そこが `PDFPage` に対して呼んでいるもの:
+
+| 呼び出し | 回数 | 場所 |
+|---|---|---|
+| `drawText` | 3 | `layout.ts:253` / `renderers/markdown.ts:148` / `renderers/table.ts:91` |
+| `drawRectangle` | 3 | `renderers/table.ts:69,77` / `renderers/markdown.ts:138` |
+| `drawLine` | 1 | `layout.ts:279` |
+| **`pushOperators`** | **4** | `struct-tree.ts:169,176,185,187`（BDC / EMC） |
+| **`page.ref`** | **3** | `struct-tree.ts:196,289,302`（`/Pg`・MCR の `/Pg`） |
+| **`page.node.set`** | **1** | `struct-tree.ts:239`（`/StructParents`） |
+| **`PDFPage` を `Map` の鍵に** | **3 つの Map** | `struct-tree.ts:92,94,96` |
+
+🔴 **`getSize` は生成パスに 1 つも無い。** 上の「`getSize` 以外に何があるか」は
+getSize が生成パスにあるという前提で書いてあったが、実測 2 件は `page-number.ts` と
+`watermark.ts` = **どちらも編集パス**。生成パスはページ寸法を `opts` から持っていて、
+ページに訊き返さない。**器を差し替えるとき、ページから読み戻す経路は無い。**
+
+🔴 **描画 3 種の外に 4 種目があった。** `pushOperators` / `page.ref` / `page.node` と、
+**ページオブジェクトの同一性**（`StructTreeBuilder` が `PDFPage` を `Map` の鍵にしている）。
+差し替える器は**ページに安定した同一性**を持たせる必要がある。
+
+`grep -rn "from 'pdf-lib'" src/` は **23 行 / 23 ファイル**（L1 で 24 → 23）。
+
+### この段で分かった、段取り表が持っていなかったもの
+
+1. 🔴 **`PdfDocumentEditor` に「空から作る」入口が無かった。** 構築子は `open(bytes)` と
+   `of(base)` だけで、`save()` も `collectObjects(this.base)` と `base.trailer` を土台にする。
+   生成パスは入力バイト列が無いので**そのままでは載らない**。§3.5 の受け皿表の
+   「文書・ページツリー ✅ `PdfDocumentEditor`」は **load → 編集 → save の面についてで、
+   create の面は測られていなかった**。→ **`PdfDocumentEditor.create()` を足した**
+   （ADR-0007 §6.5 で改訂・`appendUpdate` は断る・`opened` が 2 つの入口を区別する）
+2. 🔴 **「一度に建て直す」を選ぶと L5'（メトリクス自前化）が前に来る。** 段取り表は
+   L5' を最後に置いているが、器が pdf-lib の `PDFDocument` でなくなると
+   `doc.embedFont('Helvetica')` が呼べない。標準 14 の幅は `@pdf-lib/standard-fonts` の
+   AFM から直接取ることになる（同梱済み・`Font.load(FontNames.Helvetica)` で
+   `getWidthOfGlyph` / `Ascender` / `FontBBox` が取れることを実測）。
+   **L1.5 の決定「メトリクスは writer の関心」はそのままだが、着手時期が動く。**
+3. ⚠️ **生成検体 9 本はすべて 1 ページ**（lock の `pageCount` 実測）。つまり
+   **構造要素がページをまたぐ経路（MCR 辞書・`struct-tree.ts:299-305`）はオラクルが測っていない**。
+   normativepdf の `StructTreeBuilder` は 2 ページにまたがる要素を**投げる**
+   （エラー文が Table 357 を名指している）ので、ここは
+   **測れない面で挙動が変わりうる**。変えるなら意図して変え、記録すること
+   （[[saturated-faces-cannot-carry-a-difference]]）
 
 ### L1 の第 1 手（色）の実測 — 2026-08-14
 

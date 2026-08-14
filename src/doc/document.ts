@@ -26,9 +26,9 @@
  * graph and the two exits.
  */
 
-import type { CosObject, CosRef } from '../cos/types.js';
+import type { CosDict, CosObject, CosRef } from '../cos/types.js';
 import { dictGet } from '../cos/types.js';
-import { type PdfDocument, parsePdf, TruncatedHistoryError } from '../file/file-parser.js';
+import { PdfDocument, parsePdf, TruncatedHistoryError } from '../file/file-parser.js';
 import type { WritableObject, WriteFileOptions } from '../serialize/file-writer.js';
 import { collectObjects, writeFile } from '../serialize/file-writer.js';
 import type {
@@ -61,9 +61,32 @@ type Key = `${number} ${number}`;
 const keyOf = (objectNumber: number, generationNumber: number): Key =>
   `${objectNumber} ${generationNumber}`;
 
+/** Object number the catalog takes in a document made by `create` (§7.7.2). */
+const CREATED_CATALOG = 1;
+/** Object number the root page-tree node takes in a document made by `create`. */
+const CREATED_PAGES = 2;
+
+export interface CreateOptions {
+  /**
+   * Header version to write, `1.n` or `2.n` (§7.5.2). Defaults to `"1.7"`
+   * rather than the newest: a document says which version it needs, and a
+   * container that has nothing in it yet needs none of 2.0.
+   */
+  readonly version?: string;
+}
+
 export class PdfDocumentEditor {
   /** The file as read. Immutable, and shared with anything else reading it. */
   readonly base: PdfDocument;
+
+  /**
+   * Whether there is a file underneath. `false` for a document made by
+   * `create`, whose `base` is an empty stand-in rather than something read.
+   *
+   * This is not bookkeeping: `appendUpdate` writes a revision *after* bytes
+   * that already exist (§7.5.6), and there are none here.
+   */
+  readonly opened: boolean;
 
   readonly #changed = new Map<Key, WritableObject>();
   readonly #deleted = new Map<Key, DeletedObject>();
@@ -71,17 +94,105 @@ export class PdfDocumentEditor {
   #referenced: Set<number> | null = null;
   #nextNumber: number | null = null;
 
-  private constructor(base: PdfDocument) {
+  private constructor(base: PdfDocument, opened: boolean) {
     this.base = base;
+    this.opened = opened;
   }
 
   static async open(bytes: Uint8Array): Promise<PdfDocumentEditor> {
-    return new PdfDocumentEditor(await parsePdf(bytes));
+    return new PdfDocumentEditor(await parsePdf(bytes), true);
   }
 
   /** Wrap a document that has already been read. */
   static of(base: PdfDocument): PdfDocumentEditor {
-    return new PdfDocumentEditor(base);
+    return new PdfDocumentEditor(base, true);
+  }
+
+  /**
+   * A document with nothing in it but the two objects §7.7 requires before
+   * anything else can be attached: the catalog (§7.7.2 Table 29, `/Type
+   * /Catalog` and `/Pages`) and the root page-tree node (§7.7.3.2 Table 30,
+   * `/Type /Pages` with an empty `/Kids` and `/Count 0`).
+   *
+   * **Why an empty tree and not no tree.** `/Pages` is Required in Table 29,
+   * so a catalog without one is already outside the specification; a container
+   * that starts there would make the first thing every caller does be
+   * repairing it. `/Count 0` is consistent with an empty `/Kids` — the state
+   * R-7.7.3.2-8 asks a writer to maintain — so the empty document satisfies
+   * `checkPageTree` before anyone touches it, and `save` on it writes a
+   * readable zero-page file rather than throwing.
+   *
+   * **What this does not do.** No page is added, nothing is drawn, no font is
+   * embedded: ADR-0007 §1 keeps the authoring layer (c) above the library.
+   * This is the (a) graph container, reached from empty instead of from bytes.
+   *
+   * `appendUpdate` is refused on the result. §7.5.6 defines an update as a
+   * section appended to the file it updates, and there is no such file here.
+   */
+  static create(options: CreateOptions = {}): PdfDocumentEditor {
+    const version = options.version ?? '1.7';
+    if (!/^[12]\.[0-9]$/.test(version)) {
+      throw new RangeError(
+        `file header shall be %PDF-1.n or %PDF-2.n with n a single digit (§7.5.2); got ${version}`,
+      );
+    }
+
+    const root: CosRef = {
+      kind: 'ref',
+      objectNumber: CREATED_CATALOG,
+      generationNumber: 0,
+    };
+    const trailer: CosDict = {
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        // Table 15 defines /Size as one greater than the highest object number
+        // used in the file. `writeFile` recomputes it, but `allocate` reads it
+        // as the floor, so it has to be right here too.
+        ['Size', { kind: 'integer', value: CREATED_PAGES + 1 }],
+        ['Root', root],
+      ]),
+    };
+
+    // An empty stand-in: no bytes, no cross-reference entries, and a chain
+    // that is complete because there is nothing below it. Every read falls
+    // through to the overlay, which is where the two objects below live.
+    const base = new PdfDocument(
+      new Uint8Array(0),
+      0,
+      version,
+      version,
+      trailer,
+      new Map(),
+      { kind: 'complete' },
+    );
+    const editor = new PdfDocumentEditor(base, false);
+
+    editor.set(CREATED_PAGES, {
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        ['Type', { kind: 'name', value: 'Pages' }],
+        ['Kids', { kind: 'array', items: [] }],
+        ['Count', { kind: 'integer', value: 0 }],
+      ]),
+    });
+    editor.set(CREATED_CATALOG, {
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        ['Type', { kind: 'name', value: 'Catalog' }],
+        ['Pages', { kind: 'ref', objectNumber: CREATED_PAGES, generationNumber: 0 }],
+      ]),
+    });
+    return editor;
+  }
+
+  /** The reference naming the catalog of a document made by `create`. */
+  static get catalogRef(): CosRef {
+    return { kind: 'ref', objectNumber: CREATED_CATALOG, generationNumber: 0 };
+  }
+
+  /** The reference naming the root page-tree node of a document made by `create`. */
+  static get rootPagesRef(): CosRef {
+    return { kind: 'ref', objectNumber: CREATED_PAGES, generationNumber: 0 };
   }
 
   // -------------------------------------------------------------- reading
@@ -282,6 +393,12 @@ export class PdfDocumentEditor {
    * happen.
    */
   async appendUpdate(options: Pick<AppendUpdateInput, 'xref'> = {}): Promise<AppendUpdateResult> {
+    if (!this.opened) {
+      throw new RangeError(
+        'an incremental update is a section appended to the file it updates (§7.5.6), and a ' +
+          'document made by create() has no such file; use save()',
+      );
+    }
     if (!this.dirty) {
       throw new RangeError(
         'nothing was changed, so there is no incremental update to append (§7.5.6)',
