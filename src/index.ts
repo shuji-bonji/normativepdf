@@ -66,6 +66,17 @@ export { buildObjectStream, partitionForObjectStream } from './serialize/object-
 export { ByteWriter, writeIndirectObject, writeObject } from './serialize/object-writer.js';
 export type { BuiltXrefStream, XrefStreamEntry } from './serialize/xref-stream-writer.js';
 export { buildXrefStream } from './serialize/xref-stream-writer.js';
+export type {
+  BuiltStructTree,
+  StructElementOptions,
+  StructObjectSink,
+} from './struct/struct-tree.js';
+export {
+  StructElement,
+  StructTreeBuilder,
+  StructTreeError,
+  TaggedStream,
+} from './struct/struct-tree.js';
 export {
   EOF,
   hexValue,
