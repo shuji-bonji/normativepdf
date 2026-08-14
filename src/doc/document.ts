@@ -28,7 +28,7 @@
 
 import type { CosObject, CosRef } from '../cos/types.js';
 import { dictGet } from '../cos/types.js';
-import { type PdfDocument, parsePdf } from '../file/file-parser.js';
+import { type PdfDocument, parsePdf, TruncatedHistoryError } from '../file/file-parser.js';
 import type { WritableObject, WriteFileOptions } from '../serialize/file-writer.js';
 import { collectObjects, writeFile } from '../serialize/file-writer.js';
 import type {
@@ -178,13 +178,31 @@ export class PdfDocumentEditor {
     if (this.#referenced === null) {
       this.#referenced = await this.#scanReferences();
     }
-    let number = this.#nextNumber ?? 1;
+    let number = this.#nextNumber ?? this.#floor();
     while (this.#referenced.has(number) || this.base.xref.has(number)) {
       number += 1;
     }
     this.#nextNumber = number + 1;
     this.set(number, object, 0);
     return { kind: 'ref', objectNumber: number, generationNumber: 0 };
+  }
+
+  /**
+   * The lowest number `allocate` may consider.
+   *
+   * 🔴 `/Size` is not decoration here. Table 15 defines it as "1 greater than
+   * the highest object number used in the file", **the whole file** — every
+   * revision, not the ones this parser managed to read. On a document whose
+   * history is truncated the two differ enormously: the five-signature
+   * specimen's newest section names eight objects (1, 107, 109, 110, 151–153)
+   * while `/Size` is 154. Starting from what was read hands out object 3,
+   * which an unread revision already defines, and the incremental update then
+   * silently replaces it. Starting from `/Size` cannot.
+   */
+  #floor(): number {
+    const size = dictGet(this.base.trailer, 'Size');
+    const declared = size?.kind === 'integer' ? size.value : 1;
+    return Math.max(1, declared, ...this.base.xref.keys());
   }
 
   /**
@@ -225,6 +243,17 @@ export class PdfDocumentEditor {
    * header from it would upgrade the file without being asked.
    */
   async save(options: WriteFileOptions = {}): Promise<Uint8Array> {
+    // 🔴 A file whose /Prev chain could not be walked to the end still holds
+    // revisions below the ones that were read, and the objects they define are
+    // not in `xref`. Writing the whole file again would drop them without
+    // saying so — the references pointing at them would resolve to nothing.
+    // `appendUpdate` has no such problem: the old bytes stay where they are.
+    // Ten specimens are in this position (2026-08-14), the five-signature
+    // `dss-pades-5sigs-doctimestamp.pdf` among them.
+    const stop = this.base.chainStop;
+    if (stop.kind !== 'complete') {
+      throw new TruncatedHistoryError(stop);
+    }
     await this.#settlePageTree();
     const objects = new Map<number, WritableObject>();
     for (const object of await collectObjects(this.base)) {
@@ -258,6 +287,9 @@ export class PdfDocumentEditor {
         'nothing was changed, so there is no incremental update to append (§7.5.6)',
       );
     }
+    // Deliberately allowed on a truncated history, unlike `save`: the earlier
+    // revisions stay exactly where they are, so nothing that was not read can
+    // be lost.
     await this.#settlePageTree();
     return appendUpdateTo(this.base, this.changed(), this.deleted(), options);
   }
