@@ -90,6 +90,8 @@ export class PdfDocumentEditor {
 
   readonly #changed = new Map<Key, WritableObject>();
   readonly #deleted = new Map<Key, DeletedObject>();
+  /** Trailer entries this session set, laid over the ones that were read. */
+  readonly #trailer = new Map<string, CosObject>();
   /** Object numbers that are referenced anywhere, filled in on first allocate. */
   #referenced: Set<number> | null = null;
   #nextNumber: number | null = null;
@@ -218,7 +220,8 @@ export class PdfDocumentEditor {
 
   /** The document catalog (§7.7.2), reached through `/Root` as Table 15 requires. */
   async getCatalog(): Promise<CosObject> {
-    const root = dictGet(this.base.trailer, 'Root');
+    // Read through the overlay: a caller that replaced /Root means the new one.
+    const root = dictGet(this.trailer(), 'Root');
     if (root === undefined) {
       throw new Error('trailer has no /Root, so the catalog cannot be reached (§7.5.5 Table 15)');
     }
@@ -322,6 +325,51 @@ export class PdfDocumentEditor {
     this.#deleted.set(key, { objectNumber, generationNumber: generationNumber + 1 });
   }
 
+  /**
+   * Set a trailer entry (§7.5.5 Table 15).
+   *
+   * **Why this is here at all.** L2 deliberately left the trailer alone: its
+   * acceptance was "load, change nothing, save", which needs no trailer edit,
+   * and a half-built one that worked on `save` but not on `appendUpdate` would
+   * be worse than none. The generation path is what forced it — a document
+   * built from nothing has to write its own `/Info` and `/ID`, both of which
+   * live in the trailer, and `/ID` is Required in PDF 2.0.
+   *
+   * So it is here for both exits: `save` merges these over the trailer that was
+   * read, and `appendUpdate` carries the merged result into the appended
+   * section, which is how §7.5.6 says `/Root`, `/Info` and `/ID` change.
+   *
+   * Two keys are refused rather than accepted and then ignored:
+   *
+   * - `/Size` is derived. Table 15 defines it over "the combination of the
+   *   original section and all update sections", and both writers recompute it.
+   *   Accepting a value here would let a caller believe theirs was written.
+   * - `/Prev` names the offset of the previous section, which is a fact about
+   *   where bytes landed. `save` writes a single section and drops it;
+   *   `appendUpdate` sets it from the offset it just measured.
+   */
+  setTrailerEntry(key: string, value: CosObject): void {
+    if (key === 'Size' || key === 'Prev') {
+      throw new RangeError(
+        `/${key} is derived by the writer, not set by the caller (§7.5.5 Table 15); ` +
+          (key === 'Size'
+            ? 'it is recomputed over every section of the file'
+            : 'it is the offset of the previous section, known only once the bytes are placed'),
+      );
+    }
+    this.#trailer.set(key, value);
+  }
+
+  /** The trailer as it stands: what was read, with anything set laid over it. */
+  trailer(): CosDict {
+    if (this.#trailer.size === 0) {
+      return this.base.trailer;
+    }
+    const entries = new Map(this.base.trailer.entries);
+    for (const [key, value] of this.#trailer) entries.set(key, value);
+    return { kind: 'dict', entries };
+  }
+
   /** Everything the overlay holds, in object-number order. */
   changed(): readonly WritableObject[] {
     return [...this.#changed.values()].sort((a, b) => a.objectNumber - b.objectNumber);
@@ -334,7 +382,10 @@ export class PdfDocumentEditor {
 
   /** Whether anything has been touched. */
   get dirty(): boolean {
-    return this.#changed.size > 0 || this.#deleted.size > 0;
+    // A trailer-only change counts. §7.5.6 describes an update as a section
+    // naming what changed, and replacing /Info or /ID is a change even when no
+    // indirect object moved — refusing it as "nothing happened" would be wrong.
+    return this.#changed.size > 0 || this.#deleted.size > 0 || this.#trailer.size > 0;
   }
 
   // -------------------------------------------------------------- exits
@@ -371,7 +422,7 @@ export class PdfDocumentEditor {
       objects.set(object.objectNumber, object);
     }
     const ordered = [...objects.values()].sort((a, b) => a.objectNumber - b.objectNumber);
-    return writeFile(ordered, this.base.trailer, {
+    return writeFile(ordered, this.trailer(), {
       version: this.base.headerVersion,
       ...options,
     });
@@ -393,16 +444,29 @@ export class PdfDocumentEditor {
           'document made by create() has no such file; use save()',
       );
     }
-    if (!this.dirty) {
+    // The test is objects, not `dirty`. §7.5.6 describes the appended section by
+    // the objects it names, so a section naming none is a revision claiming a
+    // change that did not happen — and a trailer edit on its own produces
+    // exactly that. It is a real state (replacing /Root or /Info with a
+    // reference to an object that already exists changes no object), so it gets
+    // its own sentence rather than falling through to a confusing inner error.
+    if (this.#changed.size === 0 && this.#deleted.size === 0) {
       throw new RangeError(
-        'nothing was changed, so there is no incremental update to append (§7.5.6)',
+        this.#trailer.size === 0
+          ? 'nothing was changed, so there is no incremental update to append (§7.5.6)'
+          : 'only trailer entries were set, so the appended cross-reference section would name ' +
+              'no objects (§7.5.6: entries only for objects that have been changed, replaced or ' +
+              'deleted). Write the object the entry points at in the same update, or use save()',
       );
     }
     // Deliberately allowed on a truncated history, unlike `save`: the earlier
     // revisions stay exactly where they are, so nothing that was not read can
     // be lost.
     await this.#settlePageTree();
-    return appendUpdateTo(this.base, this.changed(), this.deleted(), options);
+    return appendUpdateTo(this.base, this.changed(), this.deleted(), {
+      ...options,
+      trailer: this.trailer(),
+    });
   }
 
   // -------------------------------------------------------------- internals

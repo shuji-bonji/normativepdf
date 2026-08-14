@@ -357,6 +357,78 @@ getSize が生成パスにあるという前提で書いてあったが、実測
 `color.ts` の `toPdfLibColor` 撤去・生成用の出口（`finalizePdf` 相当 = Info / XMP / `/ID` /
 ヘッダ版）・`page-ops.ts` のページ複写。
 
+### 🔴 L3' が止まった 4 つ目の欠落 — トレーラを編集する経路が無い（2026-08-14）
+
+`/Info` と `/ID` は**トレーラに載る**（§7.5.5 Table 15）。ところが 0.4.0 の公開表面に
+トレーラを編集する経路が無い:
+
+- `WriteFileOptions` は `version` / `xref` / `objectStreams` の 3 つだけ
+- `PdfDocumentEditor.save()` は `writeFile(objects, this.base.trailer, …)` と、
+  **読んだ（= create が作った）トレーラをそのまま**渡す
+- ADR-0007 §3.1 が**意図的に見送っている**:
+  「トレーラの編集はこの段では持たない。受入（無編集の往復）には要らず、
+  中途半端に入れると `appendUpdate` 側だけ効かない形になるため」
+
+L2 の受入（load → 無編集 save）には要らなかったが、**生成パスには要る** ——
+何も無いところから作る文書は `/Info` も `/ID` も自分で書く以外に無い。
+`/ID` は PDF 2.0 では Table 15 で **Required** なので、`create-text-cff-20` と
+`conformance-attach-pdfa4*` はこれ無しには成立しない。
+
+⚠️ **`base.trailer.entries` は `Map` なので実行時には書き換えられる。** これはやらない ——
+`PdfDocument` は読み取り専用として reader / verify も使っている型で、
+「readonly と書いてある入れ物を、可変だから書き換える」のは
+[[prose-pins-behaviour-and-never-fails]] を逆向きにやることになる。
+
+→ **normativepdf 0.5.0 で `setTrailerEntry` / `trailer()` を入れた**（ADR-0007 §6.6）。
+**両方の出口で効かせる** —— 見送りの理由だった「`appendUpdate` 側だけ効かない」形を
+作らないため、`appendUpdateTo` に `trailer` を受け取る口を足した。
+`/Size` と `/Prev` は断る。トレーラだけ触った場合も `dirty` は真。
+
+⚠️ **これで受け皿の欠落は 4 回連続で「L2 の受入から見た ✅」だった。**
+`create()` / メトリクスの前倒し / MCR / トレーラ —— どれも受け皿表には ✅ が付いていて、
+生成パスから呼ぼうとすると無かった。**表を作るときは「誰から見た ✅ か」を書くこと。**
+
+🔴 **着手前に `TEST_FONT_PATH` を立てて基線を取ること。** 素の `npm test` は
+**53 テストをスキップして緑になる**（実測 2026-08-14: 336 passed / 53 skipped）。
+スキップの条件は `describe.skipIf(!process.env.TEST_FONT_PATH)` で、対象は
+`tagged` 9 / `render` 3 / `glyph` 6 / `attachment` / `form` / `font-conformance` /
+`generate` / `extract` —— **L3' がいちばん大きく変える面（埋め込みフォントと
+タグ付き PDF）そのもの**である。フォントはリポジトリに同梱されていて
+（`NotoSansJP-Regular.otf` = オラクルの `FONT_CFF` と同じ実体）、外部の用意は要らない:
+
+```
+TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test
+```
+
+設定せずに回すと `font-embed.ts` と `struct-tree.ts` の後退が緑のまま通る
+（[[undecided-is-not-innocent]] = 測れなかったものを合格に数えない）。
+実測: `TEST_FONT_PATH` を立てると **336 passed / 53 skipped → 387 passed / 2 skipped**。
+
+### 🔴 オラクルは L3' のフォント欠陥を検出できない（2026-08-14 実測）
+
+`scripts/uc-oracle/digest.mjs` は、コンテンツストリームの**文字列リテラルを
+`<str:${t.length}>` に畳む**（「中身でなく長さと種別だけ」= 符号化の違いを差にしない、
+という設計）。オラクルの目的からは正しいが、その結果:
+
+**グリフ番号の対応付けを取り違えても、グリフ数が同じなら差が 0 になる。**
+`<0011 0012 0013>` と `<0021 0022 0023>` はどちらも `<str:14>` である。
+これは `font-embed.ts` がいちばん作りやすい欠陥そのもの（サブセット後の GID と
+`layout()` の返す GID がずれる = 豆腐化）。`/ToUnicode` も sha256 しか見ないので、
+**差が出ても正しさを運ばない・差が出なくても正しさを保証しない**。
+
+→ **L3' のフォントの面は poppler で測る。** 別実装（C++）なので T-2 を満たす。
+サンドボックスにも `/usr/bin/pdftoppm` と `/usr/bin/pdftotext` がある:
+
+| 面 | 測り方 | 何を捕まえるか |
+|---|---|---|
+| グリフが引けている | `pdftoppm -r 100 -png` → PNG が 3,000 バイト超 | 豆腐・空白（GID の取り違え） |
+| 辞書と実体が一致 | `pdftoppm` の stderr に `Mismatch between font type` が出ない | W-2 の症状 |
+| 抽出が成り立つ | `pdftotext` → 入力テキストと突き合わせ | `/ToUnicode` の誤り |
+
+前 2 つは `tests/font-conformance.test.ts` に既にあり、`it.skipIf(!havePoppler)` で
+**ホストに poppler が無いためスキップされている 2 件**がそれである
+（`TEST_FONT_PATH` を立てても残る 2 件の正体）。3 つ目は未実装。
+
 ### L1 の第 1 手（色）の実測 — 2026-08-14
 
 `src/services/color.ts` を置き、`Rgb` = DeviceRGB の 3 成分（§8.6.4.3）を自前の値にした。

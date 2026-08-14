@@ -353,7 +353,15 @@ export function appendUpdateTo(
   doc: PdfDocument,
   objects: readonly WritableObject[],
   deleted?: readonly DeletedObject[],
-  options: Pick<AppendUpdateInput, 'xref'> = {},
+  options: Pick<AppendUpdateInput, 'xref'> & {
+    /**
+     * Trailer to carry into the appended section, in place of the one that was
+     * read. §7.5.6 lets an update's trailer differ from the previous one — that
+     * is how `/Root`, `/Info` and `/ID` change — so a caller that edited those
+     * entries passes the result here rather than having them silently dropped.
+     */
+    readonly trailer?: CosDict;
+  } = {},
 ): AppendUpdateResult {
   const startxref = findLastStartxref(doc.bytes);
   if (startxref === null) {
@@ -373,7 +381,7 @@ export function appendUpdateTo(
   return appendUpdate({
     original: doc.bytes,
     previousXrefOffset: startxref,
-    previousTrailer: doc.trailer,
+    previousTrailer: options.trailer ?? doc.trailer,
     objects,
     ...(deleted === undefined ? {} : { deleted }),
     origin: doc.origin,

@@ -271,6 +271,89 @@ describe('a document created from empty', () => {
     await expect(doc.appendUpdate()).rejects.toThrow(/§7\.5\.6/);
   });
 
+  /**
+   * `/Info` and `/ID` live in the trailer (§7.5.5 Table 15), and a document
+   * built from nothing has to write both — `/ID` is Required in PDF 2.0. L2
+   * left the trailer alone because "load, change nothing, save" never needs it;
+   * the generation path is what forced it.
+   */
+  it('writes a trailer entry into the saved file', async () => {
+    const doc = PdfDocumentEditor.create();
+    const infoRef = await doc.allocate({
+      kind: 'dict',
+      entries: new Map<string, CosObject>([['Producer', name('Test')]]),
+    });
+    doc.setTrailerEntry('Info', infoRef);
+
+    const back = await parsePdf(await doc.save());
+    const info = dictGet(back.trailer, 'Info');
+    expect(info?.kind).toBe('ref');
+    expect(
+      dictGet(await back.getObject((info as { objectNumber: number }).objectNumber), 'Producer'),
+    ).toEqual(name('Test'));
+  });
+
+  it('refuses the two entries the writer derives (§7.5.5 Table 15)', () => {
+    const doc = PdfDocumentEditor.create();
+    expect(() => doc.setTrailerEntry('Size', { kind: 'integer', value: 99 })).toThrow(RangeError);
+    expect(() => doc.setTrailerEntry('Prev', { kind: 'integer', value: 0 })).toThrow(RangeError);
+  });
+
+  it('reads the catalog through a replaced /Root', async () => {
+    const doc = PdfDocumentEditor.create();
+    const other = await doc.allocate({
+      kind: 'dict',
+      entries: new Map<string, CosObject>([
+        ['Type', name('Catalog')],
+        ['Pages', PdfDocumentEditor.rootPagesRef],
+        ['Marker', name('Replaced')],
+      ]),
+    });
+    doc.setTrailerEntry('Root', other);
+    expect(dictGet(await doc.getCatalog(), 'Marker')).toEqual(name('Replaced'));
+  });
+
+  /**
+   * `dirty` answers "was anything touched", and a trailer entry is something
+   * touched — saying otherwise would be a small lie in the one place a caller
+   * checks before deciding to write.
+   *
+   * 🔴 But an incremental update is refused all the same, and the two facts do
+   * not contradict: §7.5.6 describes the appended section **by the objects it
+   * names**, so a trailer edit on its own would append a section naming none.
+   * That is a real state — replacing `/Root` or `/Info` with a reference to an
+   * object that already exists changes no object — so it gets its own sentence
+   * instead of falling through to "nothing was supplied" from two frames down.
+   */
+  it('reports a trailer-only change as dirty', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    expect(editor.dirty).toBe(false);
+    editor.setTrailerEntry('Info', name('x'));
+    expect(editor.dirty).toBe(true);
+  });
+
+  it('refuses an update that would name no objects, and says why', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    editor.setTrailerEntry('Info', name('x'));
+    await expect(editor.appendUpdate()).rejects.toThrow(/only trailer entries were set/);
+  });
+
+  it('carries the trailer edit when the update also writes an object', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    const info = await editor.allocate({
+      kind: 'dict',
+      entries: new Map<string, CosObject>([['Producer', name('Appended')]]),
+    });
+    editor.setTrailerEntry('Info', info);
+
+    const back = await parsePdf((await editor.appendUpdate()).bytes);
+    const ref = dictGet(back.trailer, 'Info');
+    expect(ref?.kind).toBe('ref');
+    expect(
+      dictGet(await back.getObject((ref as { objectNumber: number }).objectNumber), 'Producer'),
+    ).toEqual(name('Appended'));
+  });
+
   it('carries an added page through save, with /Count recomputed', async () => {
     const doc = PdfDocumentEditor.create();
     const pagesRef = PdfDocumentEditor.rootPagesRef;
