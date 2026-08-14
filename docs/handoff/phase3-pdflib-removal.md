@@ -5,6 +5,10 @@
 - **これが今いちばん大きい。他の 2 件（自前 inflate / reader 移行）の着手条件がここに繋がっている**
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
+> **次に着手するもの = L3'（生成パスを器ごと載せ替える）。読む順は §3.5 → §3.6 → §4。**
+> L2（文書モデル）は完了しており、詳細は [`l2-document-model.md`](l2-document-model.md) にある。
+> **着手前に §3.6 末尾の「数えること」を先に済ませること。**
+
 ---
 
 ## 1. どこまで来たか（2026-08-14 実測）
@@ -14,7 +18,7 @@
 | 0 | 準備 | ✅ 2026-08-08 |
 | 1 | 段階 0 = COS モデル + レキサ + パーサ | ✅ 受入充足（自前 inflate のみ残置） |
 | 2 | 段階 1 = シリアライザ + 増分更新 | ✅ 受入充足 2026-08-13（npm 0.3.1 公開） |
-| **3** | **段階 2 = 生成パス移行（pdf-lib 撤去）** | **⬅ ここ。7 項目中 4 つ完了（部品は揃った）。writer は L1（値）+ L1.5（文字幅）まで。L2（文書モデル）が次** |
+| **3** | **段階 2 = 生成パス移行（pdf-lib 撤去）** | **⬅ ここ。部品 4 + 文書モデル（L2）完了。writer は L1 + L1.5 まで。次は L3' = 生成パスを器ごと載せ替え（§3.6）** |
 | 4 | 段階 3 = PDF 2.0 の実体 | — |
 | 5 | 段階 4 = PDF/UA-2 + WTPDF | — |
 
@@ -153,26 +157,78 @@ services/renderers/{table,text,markdown}.ts
 難所は、それらが**生きた `PDFDocument.context` に対して register / lookup される**ことで、
 そこを置き換えるには**文書モデルが要る**。
 
-🔴 **そして normativepdf には文書モデルがまだ無い。**
-今あるのは COS・パーサ・シリアライザ・増分更新・コンテンツ/フォント/構造木/宣言のビルダで、
-**ページツリー・リソース辞書・catalog を持つ「文書」と、その load → 編集 → save の器が無い**。
-これが次に作るものである。順序を間違えると、器が無いままサービスを 1 つずつ移そうとして
+🔴 **そして normativepdf には文書モデルがまだ無かった。**（L2 で作った → [`l2-document-model.md`](l2-document-model.md)）
+順序を間違えると、器が無いままサービスを 1 つずつ移そうとして
 pdf-lib → COS の変換層を書くことになる（§6 で作らないと決めたもの）。
+
+### 🔴 段取りを組み直した（2026-08-14・L2 完了後の実測）
+
+**当初の L3 =「COS プリミティブの 1 対 1 の機械的な置換」は成立しない。**
+L2 が終わったあとに writer を数え直して分かった:
+
+- COS 型を含む **532 行のうち 302 行が、生きた pdf-lib 文書に触る文脈にある**
+- 作り方が `context.obj({}) as PDFDict` → `dict.set(PDFName.of('Type'), …)` である。
+  中身だけ normativepdf の COS に替えても、**入れる先が pdf-lib の `PDFDict` なので直列化されない**
+- pdf-lib から**実体で import している識別子は 37 種**あり、COS プリミティブはそのうち 8 種にすぎない
+
+**つまり COS は器に従属していて、器は writer が pdf-lib の
+オーサリング API（`addPage` / `drawText` / `getForm` / `embedFont` / `copyPages`）越しに持っている。**
+ADR-0007 は「オーサリング API は writer に残す」と決めたが、
+**writer は自前のオーサリング層を持っていない** — pdf-lib のものを使っている。
+だから「writer に残す」の実際の意味は
+**「writer が normativepdf の上に自前のオーサリング層を作る」**である。
+
+### 受け皿の有無（2026-08-14 実測）
+
+| 面 | writer 側 | normativepdf の受け皿 |
+|---|---|---|
+| 描画演算子（10 個） | `annotation.ts` 221 行 | ✅ `ContentStreamBuilder` |
+| 構造木・タグ | `struct-tree` / `struct-append` / `ensure-tagged` 860 行 | ✅ `StructTreeBuilder` |
+| フォント辞書 | `font-conformance.ts` | ✅ `buildType0Font` |
+| XMP・適合宣言 | `xmp.ts` / `pdfa-conformance.ts` | ✅ `declareConformance` |
+| COS・直列化・増分更新 | `incremental.ts` 587 行 | ✅ `writeFile` / `appendUpdate` |
+| 文書・ページツリー | `editor` / `builder` / `page-ops` | ✅ **`PdfDocumentEditor`（L2）** |
+| **ページ生成・サイズ** | `addPage` 4 / `getSize` 2 | ❌ **無い**（器の上で数十行） |
+| **描画の高レベル** | `drawText` 5 / `drawRectangle` 3 / `drawLine` 1 | ❌ **無い**（演算子は揃っている） |
+| **フォント埋め込みの入口** | `embedFont` 2 + メトリクス | ❌ **無い**（L1.5 で writer の関心と決定済み） |
+| **フォーム 7 クラス** | `form.ts` 546 行 | ❌ **無い** |
+| **ページ複写** | `copyPages` 2 / `PDFObjectCopier` | ❌ **無い** |
 
 ### 段取り
 
-| 段 | 中身 | なぜここか | 見える成果 |
-|---|---|---|---|
-| **L1** | `rgb` / `degrees` / `StandardFonts` の置き換え | PDF の意味を持たない値コンストラクタで、文書モデルに触らない | **完了（2026-08-14）。実体呼び出し 23 → 19 ファイル** |
-| **L1.5** | **文字幅**（`TextMetrics` = `metrics.ts`） | 🔴 **当初この表に無かった。** L2 の器を建てても、幅を訊く先が無いとテキストが 1 文字も置けない（下記） | **完了（2026-08-14）。実体呼び出しは 19 のまま — この段は依存数を動かさない** |
-| **L2** | **文書モデル**（グラフ容器 + ページツリーの意味規定）→ [`l2-document-model.md`](l2-document-model.md) | 上の実測どおり、ここが無いと他が動かない。**load の入口が 1 箇所**なので seam は 1 つで済む | 器が立つ。ここだけは新規実装で、オラクルは「まだ writer が使っていない」ので緑のまま。**受入は normativepdf 側で完結させる**（ADR-0007 §5） |
-| **L3** | COS プリミティブ（`PDFName`/`PDFArray`/`PDFDict`/`PDFRef`/`PDFNumber`/文字列系） | L2 の器の上でしか置き換えられない。件数は多いが 1 対 1 の機械的な置換 | 依存の大半が消える |
-| **L4** | 部分系: フォーム API（`form.ts` に 7 クラス）・注釈の外観（`annotation.ts` の演算子 10 個 → `ContentStreamBuilder`）・構造木（`struct-*.ts` → `StructTreeBuilder`）・`PDFObjectCopier`（merge）・`decodePDFRawStream` | 今日作った部品が受け皿になる。**annotation と struct 系は置き換え先が既にある** | 残りが落ちる |
+| 段 | 中身 | 状態 |
+|---|---|---|
+| **L1** | `rgb` / `degrees` / `StandardFonts` の置き換え | ✅ 完了（2026-08-14）。実体呼び出し 23 → 19 ファイル |
+| **L1.5** | **文字幅**（`TextMetrics` = `metrics.ts`） | ✅ 完了。🔴 当初この表に無かった段（下記） |
+| **L2** | **文書モデル**（グラフ容器 + ページツリーの意味規定）→ [`l2-document-model.md`](l2-document-model.md) | ✅ 完了（ADR-0007・受入 4 面すべて充足・テスト 382） |
+| **L3'** | **生成パスを器ごと載せ替える** — ページ生成 + 描画 3 種 + ページ複写を writer に自前化し、`PDFDocument` を `PdfDocumentEditor` に差し替える。**COS もここで一緒に置き換わる** | ⬅ 次。§3.6 |
+| **L4'** | **`form.ts`（546 行）** — AcroForm の外観生成を含む独立した部分系 | L3' の後 |
+| **L5'** | **メトリクス自前化** — 標準 14 書体の幅表（L1.5 で帰属だけ決めて実装は残してある） | 最後 |
 
 **各段の後に `npm run oracle` を回す。** 差が出たら「意図した差か」を人が判断し、
 意図した差なら **lock を単独のコミットで**更新する（ADR-0006 §7）。
 
 ⚠️ **L1 を「軽いから」で飛ばさないこと。** 計器を**実際の移行**で 1 度通してから先へ行く。
+
+⚠️ **writer の pdf-lib 依存は L2 完了時点でまだ 1 行も減っていない**（実体呼び出し 19 ファイルのまま）。
+L2 はライブラリ側の前進であって、撤去の進捗ではない。**この 2 つを同じ数字で語らないこと。**
+
+## 3.6 L3' の中身（次に着手するもの）
+
+**生成パス（`builder.ts`）と編集パス（`editor.ts`）は分けられる。生成パスが先。**
+入力 PDF が無いぶん器の差し替えが素直で、`PDFDocument.create` は
+`builder.ts` と `page-ops.ts` の 2 箇所しかない（`load` は `editor.ts:137` の 1 箇所）。
+
+自前化するもの（受け皿が無い 3 つのうち小さい方）:
+
+1. **ページ生成** — ページ辞書を作って `Kids` に足す。`/Count` は `PdfDocumentEditor` が再計算する
+2. **描画 3 種** — `drawText` / `drawRectangle` / `drawLine` を `ContentStreamBuilder` の上に。
+   合計 9 呼び出し。演算子の文脈検査はビルダが持っているので、**書けない形は書けない**
+3. **ページ複写** — オブジェクトグラフを辿って番号を振り直す。2 呼び出し。
+   ⚠️ **`allocate` の採番規則がそのまま効く**（`/Size` を下限にする = [[read-range-is-not-the-whole-file]]）
+
+⚠️ **着手前に数えること**: 生成パスが `PDFPage` の何を使っているか
+（`getSize` 以外に何があるか）。型注釈は 9 ファイルに出るが、**呼んでいるメソッドは数えていない**。
 
 ### L1 の第 1 手（色）の実測 — 2026-08-14
 
