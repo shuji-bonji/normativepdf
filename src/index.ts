@@ -29,6 +29,22 @@ export type {
 export { COS_FALSE, COS_NULL, COS_TRUE, dictGet, dictGetRaw } from './cos/types.js';
 export { PdfDocumentEditor } from './doc/document.js';
 export type {
+  NodeEntry,
+  PageEntry,
+  PageTree,
+  PageTreeReader,
+  PageTreeViolation,
+} from './doc/page-tree.js';
+export {
+  checkPageTree,
+  countCorrections,
+  INHERITABLE,
+  inheritedAttribute,
+  PageTreeError,
+  readPageTree,
+  withCount,
+} from './doc/page-tree.js';
+export type {
   XrefChain,
   XrefCompressed,
   XrefEntry,

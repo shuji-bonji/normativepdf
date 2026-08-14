@@ -37,6 +37,15 @@ import type {
   DeletedObject,
 } from '../serialize/incremental.js';
 import { appendUpdateTo } from '../serialize/incremental.js';
+import type { PageEntry, PageTree } from './page-tree.js';
+import {
+  checkPageTree,
+  countCorrections,
+  inheritedAttribute,
+  PageTreeError,
+  readPageTree,
+  withCount,
+} from './page-tree.js';
 
 /**
  * Overlay key.
@@ -109,6 +118,31 @@ export class PdfDocumentEditor {
       throw new Error('trailer has no /Root, so the catalog cannot be reached (§7.5.5 Table 15)');
     }
     return this.resolve(root);
+  }
+
+  // -------------------------------------------------------------- page tree
+
+  /** The page tree as it stands now, walked through the overlay (§7.7.3). */
+  async pageTree(): Promise<PageTree> {
+    return readPageTree(this);
+  }
+
+  /** The pages in tree order. */
+  async pages(): Promise<readonly PageEntry[]> {
+    return (await this.pageTree()).pages;
+  }
+
+  /**
+   * An inheritable attribute of a page (§7.7.3.4): the page's own value, else
+   * the nearest ancestor that has one, taken whole and never merged.
+   */
+  async pageAttribute(index: number, key: string): Promise<CosObject | undefined> {
+    const pages = await this.pages();
+    const page = pages[index];
+    if (page === undefined) {
+      throw new RangeError(`the document has ${pages.length} page(s); asked for index ${index}`);
+    }
+    return inheritedAttribute(page, key);
   }
 
   // -------------------------------------------------------------- writing
@@ -191,6 +225,7 @@ export class PdfDocumentEditor {
    * header from it would upgrade the file without being asked.
    */
   async save(options: WriteFileOptions = {}): Promise<Uint8Array> {
+    await this.#settlePageTree();
     const objects = new Map<number, WritableObject>();
     for (const object of await collectObjects(this.base)) {
       objects.set(object.objectNumber, object);
@@ -217,16 +252,46 @@ export class PdfDocumentEditor {
    * a section naming none of them is a revision claiming a change that did not
    * happen.
    */
-  appendUpdate(options: Pick<AppendUpdateInput, 'xref'> = {}): AppendUpdateResult {
+  async appendUpdate(options: Pick<AppendUpdateInput, 'xref'> = {}): Promise<AppendUpdateResult> {
     if (!this.dirty) {
       throw new RangeError(
         'nothing was changed, so there is no incremental update to append (§7.5.6)',
       );
     }
+    await this.#settlePageTree();
     return appendUpdateTo(this.base, this.changed(), this.deleted(), options);
   }
 
   // -------------------------------------------------------------- internals
+
+  /**
+   * Bring the page tree into the state §7.7.3 requires, or refuse to write.
+   *
+   * Two different things, in the order the specification puts them:
+   *
+   *   - `/Count` is **recomputed**. R-7.7.3.2-8 makes it the writer's job, and
+   *     a node is only rewritten when the value actually differs, so a file
+   *     whose counts are already right comes out byte for byte as before.
+   *   - everything else is **checked**, and a tree that breaks a rule is
+   *     refused. Repairing quietly would leave the caller believing they built
+   *     a tree they did not build.
+   *
+   * A tree that could not be reached is neither corrected nor blamed
+   * (ADR-0007 §6): nothing can be said about what was never seen.
+   */
+  async #settlePageTree(): Promise<void> {
+    const tree = await readPageTree(this);
+    if (!tree.reached) {
+      return;
+    }
+    const violations = await checkPageTree(this, tree);
+    if (violations.length > 0) {
+      throw new PageTreeError(violations);
+    }
+    for (const [objectNumber, { dict, count }] of await countCorrections(this, tree)) {
+      this.set(objectNumber, withCount(dict, count));
+    }
+  }
 
   /**
    * Every object number referenced anywhere in the file. This is the one

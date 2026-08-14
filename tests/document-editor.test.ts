@@ -151,7 +151,7 @@ describe('the two exits', () => {
     const original = fixture('flat-3pages');
     const editor = await PdfDocumentEditor.open(original);
     editor.set(3, name('Updated'));
-    const { bytes } = editor.appendUpdate();
+    const { bytes } = await editor.appendUpdate();
     expect(bytes.length).toBeGreaterThan(original.length);
     expect(bytes.slice(0, original.length)).toEqual(original);
   });
@@ -159,20 +159,20 @@ describe('the two exits', () => {
   it('the appended revision is what a reader sees, the previous one still serves the rest', async () => {
     const editor = await PdfDocumentEditor.open(fixture('flat-3pages'));
     editor.set(3, name('Updated'));
-    const read = await parsePdf(editor.appendUpdate().bytes);
+    const read = await parsePdf((await editor.appendUpdate()).bytes);
     expect(await read.getObject(3)).toEqual(name('Updated'));
     expect((await read.getObject(4)).kind).toBe('dict'); // from the previous section
   });
 
   it('refuses to append a revision that changed nothing (§7.5.6)', async () => {
     const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
-    expect(() => editor.appendUpdate()).toThrow(/nothing was changed/);
+    await expect(editor.appendUpdate()).rejects.toThrow(/nothing was changed/);
   });
 
   it('an update written as a cross-reference stream reads back the same way', async () => {
     const editor = await PdfDocumentEditor.open(fixture('flat-3pages'));
     editor.set(3, name('Updated'));
-    const read = await parsePdf(editor.appendUpdate({ xref: 'stream' }).bytes);
+    const read = await parsePdf((await editor.appendUpdate({ xref: 'stream' })).bytes);
     expect(await read.getObject(3)).toEqual(name('Updated'));
   });
 });
