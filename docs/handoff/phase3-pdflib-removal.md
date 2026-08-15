@@ -353,9 +353,124 @@ getSize が生成パスにあるという前提で書いてあったが、実測
 `Ascent 1160 / Descent -288 / CapHeight 733 / XHeight 543 / FontBBox [-1002,-1048,2928,1808]`）。
 式（`値 × 1000 / unitsPerEm`）は推測ではなく、この照合で決めてある。
 
-**残り**: `struct-tree.ts` の載せ替え・`builder.ts` / `layout.ts` / `renderers` の接続・
-`color.ts` の `toPdfLibColor` 撤去・生成用の出口（`finalizePdf` 相当 = Info / XMP / `/ID` /
-ヘッダ版）・`page-ops.ts` のページ複写。
+### L3' 完了（2026-08-14）— 生成パスから pdf-lib が消えた
+
+`grep -rn "from 'pdf-lib'" src/` = **23 → 20**。生成パスのファイルは全部 0 件:
+`builder` / `layout` / `color` / `struct-tree` / `font-embed` / `output-created` /
+`writer-doc` / `cos` / `renderers` × 3。
+
+⚠️ **20 行が残っているのは編集パス**（`editor` / `form` / `incremental` / `page-ops` /
+`annotation` / `attachment` / `outline` / `watermark` / `page-number` / `ensure-tagged` /
+`struct-append` / `doc-level` / `output` / `xmp` / `pdf-version` / `pdfa-conformance` /
+`rotation` / `font-conformance`）と、境界を明示するために切り出した 2 ファイル
+（`color-pdflib.ts` / `font-manager-pdflib.ts`）。
+
+⚠️ **「生成パスのファイルが 0 件」は「生成パスが pdf-lib を引かない」ではない。**
+`xmp.ts`（`buildXmpPacket`）・`pdf-version.ts`（`DEFAULT_PDF_VERSION`）・
+`font-conformance.ts`（`makeSubsetCharsetIdentity`）は編集パスと共有しており、
+それらのファイル自体はまだ pdf-lib を import している。実行時依存 0（受入 §4 の 1 番）は
+**編集パスを移すまで達成されない**。
+
+🔴 **「差 19 件」は検体数であって差の数ではなかった。** 実測は **26 検体 / 383 行**。
+そのうち **123 行以上が表示されていなかった**（`run.mjs` が `slice(0, 12)` で黙って切っていた）。
+さらに `diffTrees` の収集上限 40 で、`edit-page-numbers` は 46 行あるうち 40 で切れていた。
+
+**3 回続けて「全部帰属した」と誤って報告した。** 見えている行を直すたびに次が現れる:
+記述子の丸め → `/W` → `xmp/shape` → まだ 123 行。毎回「見えている行が全部」と読んだ。
+⚠️ **表示行数から隠れ件数は推測できない。** `diffTrees` は途中で打ち切って返すので、
+11 行しか表示されていない検体に 17 件あることが実際に起きた。
+
+計器を直した（`fix(gate)`）: 省略件数を申告する / 収集上限を外す /
+**全件を JSON に落としてパスを出す**（端末は 12 行しか出さないので、
+出力を読んだだけでは帰属を終えられない）/ 見出しを `N 検体 / M 行` に。
+
+**383 行すべてを帰属できた**（`npm test` 387 緑・型検査 0 件・`grep` 23 → 20）:
+
+| 件数 | 経路 |
+|---|---|
+| 107 | フォント資源の重複解消 |
+| 69 | サブセットタグ |
+| 46 | ToUnicode |
+| 34 | 空辞書（`/ExtGState` `/XObject`） |
+| 24 | `/Contents`（配列 → ストリーム / ops のフォント番号） |
+| 16 | `/Annots` の空配列 |
+| 12 | `/Creator` |
+| 75 | 編集パスのフォントの番号ずれ（`FontFile3` 6 + `/W` 69・`edit-page-numbers` 46 / `edit-watermark` 23） |
+
+以下は経路ごとの内訳:
+
+| 差 | 帰属 |
+|---|---|
+| フォント資源の重複解消（`Font#1..#4 → <absent>` / ops の番号ずれ） | 意図。旧実装は `drawText` ごとに乱数鍵を作っていた |
+| `/ExtGState` `/XObject` の空辞書・`/Annots` の空配列を書かない | 意図 |
+| `/Contents` を 1 要素の配列で包まない（Table 31） | 意図 |
+| `/ToUnicode` の bytes / sha256 | 意図（CMap を自前で組んだ） |
+| `BaseFont` のサブセットタグ | 意図（normativepdf の `subsetTag`。算法が違う） |
+| `/info//Creator` が消える | 意図（pdf-lib が自分の名前を入れていた） |
+| **`edit-page-numbers` の `FontFile3` 4648 → 2200** | **上の重複解消の帰結**。ops 行が証拠 = スタンプが `/Font#3` → `/Font#1` に移り、正規化名がずれて**別のフォント同士を並べていた** |
+
+🔴 **この段で自分の欠陥を 3 件出した。いずれも「移し忘れ」である。**
+
+1. **`/ID` を版に関係なく書いた。** Table 15 は PDF 2.0 で Required だが、
+   **1.7 では `/Encrypt` があるときだけ**。旧実装も 2.0 の分岐でしか呼んでいなかった
+2. **CFF charset を identity に書き換える処理を落とした**（R-9.7.4.2-4）。
+   CID-keyed CFF を harfbuzz でサブセットすると charset は「新 GID → 元の CID」のまま
+3. **`refreshSfntChecksums` を落とした**（2 と 1 組）。差の形が
+   「長さは同じで sha256 だけ違う」だったのが手がかりだった
+
+**2 と 3 は同じ関数から連続して落とした。** `normalizeEmbeddedFonts` を
+「pdf-lib が書いた辞書を後から是正するもの」という**表題で捉え**、
+その中に**プログラムのバイト列に対する仕事が混ざっている**ことを 2 回とも見落とした。
+`makeSubsetCharsetIdentity` が 2 つを 1 組で持つ形にしたので、次に移すときは一緒に動く。
+
+🔴 **2 について「poppler が正しく描画したので欠陥ではない」と一度報告した。**
+poppler は CID → charset → GID を辿らない実装かもしれず、**寛容な消費者 1 つで
+結論を出していた**。W-2 が長く生き延びたのと同じ死角に、同じ形で入った。
+テストのほうが厳しい計器だった。
+
+⚠️ **オラクルはこのうち 2 を検出できない。** `digest.mjs` は文字列リテラルを
+`<str:${length}>` に畳むので、グリフ番号を取り違えても長さが同じなら差が 0 になる。
+フォントの面は poppler で測ること（`pdftoppm` の PNG サイズ / `pdftotext` の抽出）。
+
+⚠️ **テストヘルパが 3 本、非圧縮化で空振りしていた**（`inflateSync` に失敗したストリームを
+黙って捨てていた）。**赤くならずに何も測らなくなる形**で、
+「グリフの外形が残っているか」「CID と ToUnicode が一致するか」「BDC の marking」が
+丸ごと止まっていた。解けたら解いた側を・解けなければ生バイトを見るように直した。
+
+### 🔴 ページ複写は L3′ に収まらない（2026-08-14 実測）
+
+§3.6 は L3′ の 3 つ目に「ページ複写 — オブジェクトグラフを辿って番号を振り直す。2 呼び出し」を
+入れていたが、**複写元が pdf-lib の文書である**ため成立しない:
+
+- `page-ops.ts` は複写元を `loadForEdit`（`editor.ts`）から得る。返るのは pdf-lib の `PDFDocument`
+- 複写先だけを `PdfDocumentEditor` にすると、**pdf-lib のオブジェクトグラフを COS へ移す層**を
+  書くことになる = §6「pdf-lib → COS の変換層を作らない」に正面から反する
+- `loadForEdit` の呼び出し元は **editor 13 / page-ops 8 / incremental 1**。
+  つまりページ複写は「読み側を移す」と同じ作業であり、生成パスの一部ではない
+
+→ **ページ複写は L4′（編集パス）へ送る。L3′ は生成パスで完了。**
+「2 呼び出しだから小さい」は呼び出し回数の数字で、**依存の向きを数えていなかった**。
+
+### 段取り（L3′ 完了時点で更新）
+
+| 段 | 中身 | 状態 |
+|---|---|---|
+| L1 / L1.5 / L2 / L3′.0 | 色・回転・標準 14 の名前 / 文字幅 / 文書モデル / normativepdf 0.4.0・0.5.0 の公開 | ✅ |
+| **L3′** | **生成パスを器ごと載せ替える** | ✅ 完了。import 23 → 20・生成パスのファイルは 0 件 |
+| **L4′** | **編集パス** — 読み側（`loadForEdit`）・ページ複写・`form.ts`（546 行）・注釈・添付・しおり・透かし・ページ番号・増分更新 | ⬅ 次。pdf-lib を import する 20 ファイル・**合計 5,981 行** |
+| **L5′** | **標準 14 書体の幅表** — `@pdf-lib/standard-fonts` の AFM 直読みをやめる | 最後 |
+
+⚠️ **L4′ の入口は `loadForEdit` 1 本**（呼び出し元 22 箇所）。ここを
+`PdfDocumentEditor.open` に替えると、下流の 20 ファイルが一斉に型で落ちる。
+生成パスのときと同じく、**受け皿の欠落を先に数えてから**着手すること ——
+L3′ では受け皿表の ✅ が 4 回続けて「L2 の受入から見た ✅」だった。
+編集パスで要るのに無いものの候補: 既存ページの読み書き・注釈配列の更新・
+AcroForm の外観生成・`copyPages` 相当のグラフ複写・`/ID` の更新（§14.4）・
+DocMDP 判定・dirty 参照追跡（後ろ 3 つは §6 のとおり writer に残るもの）。
+
+**撤去し切るときに消えるもの**: `color-pdflib.ts` / `font-manager-pdflib.ts`
+（境界を数えられるように切り出した 2 ファイル）・`normalizeEmbeddedFonts` の
+辞書是正部分（`buildType0Font` が表現不能にしたので、編集パスが移れば要らなくなる）。
 
 ### 🔴 L3' が止まった 4 つ目の欠落 — トレーラを編集する経路が無い（2026-08-14）
 
