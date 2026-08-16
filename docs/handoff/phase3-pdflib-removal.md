@@ -6,7 +6,8 @@
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
 > **次に着手するもの = L4′.2。ただし移す単位は「ファイル」ではなく「ツール」だった → [§3.11](#311-l42-着手--移す単位はファイルではなくツールだった2026-08-15)。**
-> 1 本目（`rotate_pages`）は完了 → §3.11.8。**2 本目は `incremental.ts`**（§3.12 で前倒しを決めた）。
+> 1 本目（`rotate_pages`）は完了 → §3.11.8。2 本目の出口（`appendOpened`）も完了 → **§3.13**。
+> 次は `set_metadata` を新経路へ（§3.13.5）。
 > 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
 > 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
@@ -1852,6 +1853,85 @@ TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test
 3. dirty の申告漏れという欠陥クラスが表現不能になる
 
 → **L4′.2 の 2 本目を `incremental` にする。** §3.8.3 の L4′.7 からここへ動かす。
+---
+
+## 3.13 増分更新の出口を測って書いた（L4′.2 の 2 本目・2026-08-15）
+
+### 3.13.1 先に測った —— 旧経路と同じ判定で
+
+`tests/incremental.test.ts` が何を測っているかを数え、**同じ判定**を
+`PdfDocumentEditor.appendUpdate` に掛けた（計器を新しく書かない ——
+書くと食い違ったときに相手を疑う。今日 3 度踏んだ形である）。
+
+| 判定 | 旧（`buildIncrementalUpdate`） | 新（`appendUpdate`） |
+|---|---|---|
+| 前方バイト同一・古典 xref テーブル | ✅ | ✅ |
+| 前方バイト同一・相互参照ストリーム | ✅ | ✅ |
+| `/Prev` が旧 `startxref` を指す | ✅ | ✅ |
+| 新規オブジェクトが元 trailer の `/Size` 以上 | ✅ | ✅ |
+| pdf-lib で読み戻して変更が見える | ✅ | ✅ |
+| `origin > 0`（B-22 の回帰・origin 137） | ✅ | ✅ |
+| `/ID` §14.4 | writer の `updateFileId` | **writer が `setTrailerEntry` で行う** |
+
+⚠️ **追記部の長さは比べていない。** 実測は 317 対 1,220 バイトなどと出るが、
+新経路で足した注釈は最小の 4 項目、旧経路のものは外観ストリーム・著者・日付つきで、
+**書いているものが違う**。出口の効率の差ではない。
+
+**`/ID` の挙動を実測で確かめた**（設計どおり）:
+
+```
+入力                : AAAA… / BBBB…
+setTrailerEntry 無し: AAAA… / BBBB…   ← appendUpdate は base.trailer をそのまま引き継ぐ
+setTrailerEntry 有り: AAAA… / CCCC…
+```
+
+つまり §14.4（第 1 要素は保持・第 2 要素は更新 shall）は**writer の仕事のまま**で、
+§3.12.1 の見立て（`updateFileId` の 20 行は残る）が裏づけられた。
+
+### 3.13.2 書いたもの（`src/services/incremental-append.ts`・124 行）
+
+`appendOpened(opened, opts)` —— 直列化も相互参照も書かない。残るのは方針だけ:
+
+- `/ID` の第 2 要素を更新する（§14.4）。ダイジェストは**元バイト列 +
+  この更新が書くオブジェクト**から取る。旧実装は追記済みのバイト列を混ぜていたが、
+  追記の版付けは `appendUpdate` が行うので、**書く前に決まるものだけ**を混ぜる。
+  §14.4 の NOTE が「計算は再現可能である必要はない」と言っているので、これで足りる
+- `/ID` を持たない文書には**何もしない**。無いものを足すのは §14.4 の要求ではなく、
+  `/ID` の有無そのものが `ensure_pdfa` の報告の根拠になっている
+- 出力の規約（`outputPath` / `returnBase64` / `EditResult`）を旧出口と揃える
+- 追記する節の形は**直前の節に合わせる**（`SourceForm`）
+
+🔴 **書くオブジェクトの集合を呼び出し側が申告しない。** 旧実装は
+「`sinceObjectNumber` より大きい番号 + 渡された `dirtyRefs`」を書いており、
+`pageContentDirtyRefs` / `catalogNamesDirtyRefs` の 69 行がその申告を組み立て、
+`editor.ts` の各ツールが `markDirty(...)` を呼んで回っていた。
+`PdfDocumentEditor` では変更が `set` / `allocate` / `delete` / `setTrailerEntry` しか
+通らないので、**触ったものがそのままオーバレイ = 書く集合**になる。
+**申告漏れという欠陥クラスが表現不能になる。**
+
+### 3.13.3 受入（素の node で 15/15・vitest はホスト）
+
+`tests/incremental-append.test.ts`（6 面）を足した。同じ筋を素の node で走らせて
+**15 の判定すべて通過**（origin 0 / 137 の 2 条件 × 7 + 無変更の拒否 1）。
+
+### 3.13.4 ⚠️ まだ無いもの
+
+1. **DocMDP（§12.8.2.2）の判定がこの出口に無い。** `findDocMdpPermission`（57 行）は
+   まだ pdf-lib の文書を取る。**最初の `preserveSignatures` 付きツールをこの出口へ
+   寄せるときに COS 版へ移すこと** —— 移し忘れると、認証署名の許可レベルを
+   見ないまま追記する。`incremental-append.ts` の冒頭に ⚠️ で書いてある
+2. **まだ誰も呼んでいない。** `grep -rn "from 'pdf-lib'" src/` は 20 行のまま。
+   進捗は**新経路を通るツールの本数（17 本中 1 本）**で見る
+3. **実署名での受入は測っていない。** `tests/incremental.test.ts` と同じく、
+   `verify_signatures` / `verify_integrity` はホストの verify + veraPDF で行う面である
+
+### 3.13.5 次にすること
+
+1. `findDocMdpPermission` の COS 版（catalog → `/Perms` → `/DocMDP` →
+   `/Reference` → `/TransformParams` → `/P`）を書く
+2. **`set_metadata` を新経路へ**（§3.11.1 の表で最小 —— 葉は `xmp` だけ）。
+   preserve 枝は `appendOpened`、通常枝は `saveOpened`
+3. `xmp.ts` を COS 版にする（`set_metadata` が呼ぶのはここだけ）
 ---
 
 ## 4. 受入
