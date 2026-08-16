@@ -5,7 +5,9 @@
 - **これが今いちばん大きい。他の 2 件（自前 inflate / reader 移行）の着手条件がここに繋がっている**
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
-> **次に着手するもの = L4′（編集パス）。読む順は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測) → [§3.8](#38-l4-の段取り案2026-08-15) → §4。**
+> **次に着手するもの = L4′.2（COS だけの葉 8 ファイル）。L4′.1 は完了 → [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15)。**
+> 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
+> 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
 > L2（文書モデル）は完了しており、詳細は [`l2-document-model.md`](l2-document-model.md) にある。
 > **着手前に §3.6 末尾の「数えること」を先に済ませること。**
@@ -1367,7 +1369,7 @@ L4′.1〜.3 は **0.5.0 のまま**進められる —— L3′ で「公開さ
 
 | 段 | 中身 | 依存する normativepdf |
 |---|---|---|
-| **L4′.1** | 入口と出口を 2 本にする（`loadForEditN` / `saveEditedN`）+ 回復読み + 暗号化ガード | **0.5.0**（§3.8.1.1 で実証済み） |
+| ~~**L4′.1**~~ ✅ | 入口と出口を 2 本にする（**`openForEdit` / `saveOpened`** に改名）+ 回復読み + 暗号化ガード → [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) | **0.5.0**（§3.8.1.1 で実証済み） |
 | **L4′.2** | COS だけの葉 8 ファイル | **0.5.0** |
 | **L4′.3** | `watermark` / `page-number`（新規ストリームを足すだけ） | **0.5.0** |
 | **L4′.3.5** | **normativepdf 0.6.0 を公開**（連結内容ストリーム 1 件）・writer の dep を上げる | — |
@@ -1388,6 +1390,155 @@ L4′.1〜.3 は **0.5.0 のまま**進められる —— L3′ で「公開さ
 | 5 | フィールド木を 0.7.0 に入れるか writer に置くか | L4′.5 の着手直前（3.9.2） |
 
 **1（(a)/(b)）と 4（FontFile3 の増分）は決まった。**
+---
+
+## 3.10 L4′.1 着手 — 入口と出口を 2 本にした（2026-08-15）
+
+**置いたもの（すべて新規・既存 20 ファイルは 1 行も移していない）:**
+
+| ファイル | 行 | 中身 |
+|---|---|---|
+| `src/services/edit-open.ts` | 253 | 新しい入口 `openForEdit`。署名ガード・サイズ上限・**暗号化ガード**・**回復読み** |
+| `src/services/output-edited.ts` | 144 | 新しい出口 `saveOpened`。`/Info` の `/ModDate` を打って全書き直し |
+| `src/services/signature-scan.ts` | 24 | `containsSignature` を `editor.ts` から移した（下記） |
+| `src/services/pdf-date.ts` | 18 | §7.9.4 の日付文字列。`output-created.ts` と共用 |
+| `tests/edit-open.test.ts` | 185 | 下記 6 面 |
+
+`grep -rn "from 'pdf-lib'" src/` は **20 行のまま**。新しい 4 ファイルは pdf-lib を
+1 行も import していない（`pdf-lib` の語はコメントにしか出ない）。
+**まだ誰も新しい入口を使っていないので、これは想定どおりである**
+（[[shipped-is-not-used]] を自分で踏まないよう明記する）。
+
+### 3.10.1 この環境で回せたもの・回せなかったもの
+
+| | 結果 |
+|---|---|
+| 型検査（`tsc --noEmit`・TS 5.9 を借りる） | **0 件**。`node ../../lib/normativepdf/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit` |
+| `tests/edit-open.test.ts` の型検査 | 0 件（`tsconfig.json` は `tests` を除外しているので個別に掛けた） |
+| `npm test`（vitest） | サンドボックスでは ❌ **動かない**（`Cannot find native binding … @rolldown/binding-wasm32-wasi`）→ **ホストで実行済み: 31 ファイル / 395 passed / 2 skipped** |
+| `npm run check`（biome） | サンドボックスでは ❌ **動かない**（同じくネイティブバイナリ）→ **ホストで実行済み: `check:fix` の後 83 ファイル clean** |
+
+⚠️ **vitest と biome はホスト（macOS）で回す。** この環境は Linux で、
+`node_modules` には macOS のバイナリが入っている。`npm install` はしない
+（[[no-npm-install-in-sandbox]]）。**回していない検査を合格に数えない**
+（[[undecided-is-not-innocent]]）ので、サンドボックス側の受入は
+**すべて `node` で dist を直接叩いて**取り、テストと lint はホストで取った。
+
+**ホスト実測（2026-08-15）: 387 → 395 passed。差の +8 は
+`tests/edit-open.test.ts` の `it` の数と一致する**（2 + 1 + 3 + 1 + 1）。
+skipped は 2 のまま（poppler が無いためのフォント 2 面）。
+`check:fix` は**書式だけ**を直した（`edit-open.ts` 253 → 257 行・テスト 185 → 191 行の折り返し。
+既存 2 ファイルの差分は移動そのものだけで、意味は変わっていない）。
+
+🔴 **テストの筋は、vitest 抜きで 1 度通してある。** 同じフィクスチャと同じ判定を
+素の node で走らせて **14 / 14 通過**。その過程で 2 件直した（3.10.5）。
+
+### 3.10.2 旧入口に無く、新入口にあるもの
+
+1. **暗号化の拒否**（§3.7.4 の欠落 2）。`PdfDocumentEditor.open` の後に
+   `dictGet(base.trailer, 'Encrypt')` を見る。旧入口は pdf-lib の例外文言を
+   `/encrypt/i` で見ていたので、normativepdf に替えると**判定ごと消えていた**
+2. **回復読み**（§3.7.3 の欠落 1）。`chainStop !== 'complete'` のとき、
+   ファイル全体から `startxref` を拾って節を読み、xref を重ねてから
+   `PdfDocumentEditor.of` に渡す。重ねる順は**オフセット昇順**だが、
+   **最後に「鎖で歩けた分」を上から置く** —— 鎖で届いた項目は文書自身が
+   「最新である」と言っているもので、走査で拾った節はその隙間を埋めるだけにする
+
+**推量であることの表し方**（§3.9.7 の 3 を決めた）:
+
+- 返り値の `xref.kind` が `'recovered'` になり、拾えた節・読めなかった節・
+  項目数の増減を持つ
+- `chainStop` を**そのまま引き継ぐ**ので `PdfDocumentEditor.save()` は
+  引き続き `TruncatedHistoryError` で断る
+- **`saveOpened` は回復した文書を断る。** 全書き直しは推量を出力に焼き付け、
+  走査が拾えなかったものを黙って落とす。回復した文書に書けるのは増分更新だけ
+
+### 3.10.3 `containsSignature` を移した理由
+
+`edit-open.ts` はこの検査を要るが、`editor.ts` は L4′.2 以降で**新しい入口を使う側**に
+なる。`edit-open.ts` → `editor.ts` の向きを作ると輪になるので、
+`signature-scan.ts` へ出した。**`editor.ts` からは再輸出している** ——
+`tests/editor.test.ts` が `../src/services/editor.js` から import しているためで、
+「関数を動かすときは tests/ も同じ grep に含める」を再輸出で満たしている。
+
+### 3.10.4 受入（コーパス 2,917 本・2026-08-15 実測）
+
+`openForEdit` → `saveOpened` を全検体に掛けた（`allowBreakingSignatures: true` で
+署名ガードは外し、入口そのものを測る）:
+
+| | 本数 |
+|---|---|
+| pdf-lib が load できる（比較用） | 2,912 |
+| **`openForEdit` が開ける** | **2,897** |
+| ↳ `xref.kind === 'chain'` | 2,896 |
+| ↳ `xref.kind === 'recovered'` | **1** |
+| **`saveOpened` が書ける** | **2,890** |
+
+**断った 20 本の帰属（全部名前で挙げる）:**
+
+| 分類 | 本数 | pdf-lib は開けるか |
+|---|---|---|
+| `ENCRYPTED_PDF`（trailer に `/Encrypt`） | 4 | **4 本とも pdf-lib も断る** = 後退ではない |
+| `INVALID_PDF` — `PdfDocumentEditor.open` が条文を名指して断る | 15 | **14 本は pdf-lib が開ける**（1 本はヘッダが不正で pdf-lib も落ちる） |
+| `INVALID_PDF` — 回復読みが届かなかった | 1 | pdf-lib は開ける（`PDF_A-1b/…/6-1-4-t01-fail-a.pdf`・`chainStop = unreadable`） |
+
+→ **pdf-lib が開けるのに新入口が断るのは 15 本。**
+14 本は**ライブラリの厳しさ**（ヘッダ直後の EOL・`xref` の行・catalog `/Version` の形・
+部分表の個数）で、writer 側の回復では埋められない。1 本は**走査が xref 節しか見ていない**
+ためで、pdf-lib のようにオブジェクトを走査すれば届く可能性がある。
+**どちらも「意図的破損検体だから」で片づけない**（[[fail-specimens-classified-by-name]]）——
+埋めるかどうかは判断であって、無害ではない。
+
+**`saveOpened` が落ちた 7 本**: 回復した 1 本（設計どおりの拒否）+
+オブジェクトが読めない 6 本（`stream` の後の EOL が無い / `endstream` が来ない）。
+**7 本とも `INVALID_PDF` を名乗る**（下記 3.10.5 の 1 件目）。
+
+### 3.10.5 出力の面（qpdf・ADR-0004 §2）
+
+`openForEdit` → `saveOpened` の出力を、元ファイルと同じ判定で比べた:
+
+```
+qpdf --check (source vs saveOpened): 400/400 introduced nothing new
+```
+
+⚠️ **400 本の標本である**（この環境は 1 コマンド 45 秒で切れる）。全 2,890 本は測っていない。
+
+### 3.10.6 実装中に直した 3 件
+
+1. 🔴 **例外の包みを `save()` にだけ掛けていた。** コーパスで測ると、6 本は
+   `save()` ではなく **`/Info` を読む段（`touchModDate`）**で落ちていて、
+   writer のエラー体系の外（`code` 無し）に出ていた。書き出しまでを 1 つの
+   `try` にした。**「どこで落ちるか」を測らずに包む場所を決めていた**
+2. 🔴 **落ちる理由 2 通りに同じ hint を返していた。** ページツリーが §7.7.3 に反する
+   （足りない項目を足せば直る）と、オブジェクトが読めない（元が壊れている）は
+   次にすることが違う。`PageTreeError` で分けた
+3. 🔴 **自分の qpdf 計器が既存の門番と違っていた。** 最初 250 本中 2 本が
+   「苦情が増えた」と出たが、中身は `File is not linearized` ——
+   既存の `roundtrip-corpus.mjs` は `^(ERROR|WARNING)` の行だけを見ている。
+   **今日 3 度目である**（`writeFile` の `version` 既定・`parsePdf` と `tryParse`）。
+   [[fallback-defaults-are-not-observations]] に追記済み
+
+**テストのフィクスチャでも 1 件出た。** 最小のページ辞書に `/Resources` を置いておらず、
+`saveOpened` が R-7.7.3.4-2 で断った。R-7.7.3.3-8 は「何も要らないページは**空の辞書**」と
+定めており、項目ごと落とすと「祖先から継承する」の意味になる。**素の node で
+走らせなければ、テストを書いた時点では気づけなかった**（vitest がこの環境で動かないため）。
+
+### 3.10.7 まだやっていないこと
+
+1. ~~ホストで `npm test` と `npm run check`~~ → ✅ **済み**（395 passed / 2 skipped・biome clean）
+2. **`normalizeEmbeddedFonts` が新出口に無い**（`output-edited.ts` の冒頭に ⚠️ で明記し、
+   `tests/edit-open.test.ts` に「まだ呼んでいない」を固定するテストを置いた）。
+   **L4′.2 で `font-conformance.ts` を移すときに足し、そのテストを消す**
+3. **増分更新の出口が無い。** 回復した文書に書けるのは増分だけだが、
+   `incremental.ts` はまだ pdf-lib の文書を取る。L4′.7 で繋がる
+4. **`openForEdit` はまだどこからも呼ばれていない。** L4′.2 で最初のサービスを繋ぐ
+
+### 3.10.8 段取り表の更新
+
+| 段 | 状態 |
+|---|---|
+| **L4′.1**（入口と出口を 2 本にする） | ✅ **完了**（2026-08-15）。型検査 0 / **ホスト `npm test` 395 passed・2 skipped** / **biome clean** / コーパス 2,897 開・2,890 書き / qpdf 400 標本で苦情の増加なし |
+| L4′.2（COS だけの葉 8 ファイル） | ⬅ 次 |
 ---
 
 ## 4. 受入
