@@ -1700,7 +1700,7 @@ capturedAt は `2026-08-14T04:11`、L3′ の実装は `b83fc17` でその後に
 `PDFDocument` を引き続き引く）。**この段の進捗はこの数字では測れない** ——
 測るのは**新経路を通るツールの本数で、17 本中 1 本**である。
 
-### 3.11.9 次にすること
+### 3.11.9 次にすること（→ 実走の結果は 3.11.10。**予測は外れた**）
 
 1. **（ホスト）`npm run oracle`** — `edit-page-ops` に差が出る。照合表は 3.11.3:
    `meta.objectCount` が 2 減る（ObjStm + XRef を足さない）/
@@ -1709,6 +1709,84 @@ capturedAt は `2026-08-14T04:11`、L3′ の実装は `b83fc17` でその後に
 2. **（ホスト）`npm test`** — `tests/page-rotate.test.ts` の 8 面が乗るので 403 前後
 3. 差を照合したら lock を単独コミットで更新
 4. `incremental.ts` の前倒しを決める（3.11.1 — 11 本中 9 本がここで止まっている）
+### 3.11.10 ホスト実走で 3 件出た（2026-08-15）
+
+#### (1) 🔴 オラクルは「差なし」だった —— 予測が外れた
+
+§3.11.9 は「`edit-page-ops` に `meta.objectCount` が 2 減る差が出る」と書いた。
+**実際は 26 検体すべて差なしだった。**
+
+理由は測る場所である。`edit-page-ops` は
+**rotate → reorder → extract の 3 段**で、後ろ 2 段（`copyIntoNewDoc`）が
+**新しい文書へ複写する**。つまり rotate が書いたファイルの形
+（相互参照の種類・ヘッダの版・オブジェクト数）は**最終成果物に 1 つも残らない**。
+オラクルは各段の成果物ではなく**鎖の最後だけ**を測っている。
+
+⚠️ **「差なし」は「切り替えが正しい」の証拠にならない。**
+この段については、オラクルは**何も測っていなかった**
+（[[undecided-is-not-innocent]] / [[saturated-faces-cannot-carry-a-difference]]）。
+切り替えの根拠は §3.11.3 の A/B（33 検体・digest 一致 or 2 因に帰属）のほうである。
+
+→ **検体 `edit-rotate-20` を足した**（`rotate_pages` 単独・入力は
+`Simple PDF 2.0 file.pdf` = `%PDF-2.0`・catalog `/Version` 無し）。
+これで `meta.headerVersion` の面がこの段で測れるようになる。
+⚠️ この golden は**新実装から採る**ことになる（旧実装はもう木に無い）。
+旧との比較は §3.11.3 が果たしており、この検体は**この先の変更を測るため**のものである。
+
+**教訓**: 鎖の途中の段を移すときは、**その段だけの検体があるかを先に見る**。
+無ければ「差なし」は沈黙であって合格ではない。
+
+#### (2) 🔴 `tests/` の grep 漏れ —— 3 度目
+
+`npm test` が 1 本落ちた:
+
+```
+FAIL tests/doc-level.test.ts > rotate_pages は in-place なので catalog を保ち、警告も出ない
+TypeError: rotatePages is not a function
+```
+
+`page-ops.ts` から `rotatePages` を消したが、`tests/doc-level.test.ts` が
+`../src/services/page-ops.js` から import していた。
+**L1（`parseHexColor`）・L4′.1（`containsSignature`・再輸出で回避）に続いて 3 度目**である。
+
+直し方は L4′.1 と変えた。**再輸出はしない** ——
+`containsSignature` は置き場所だけ変えたので `editor.ts` から再輸出したが、
+`rotatePages` は**所属そのものが変わった**（page-ops のツールではなくなった）。
+再輸出すると「page-ops にまだある」という嘘が残る。テスト側の import を
+`page-rotate.js` に向けた。
+
+素の node で、この落ちたテストの筋を通した:
+
+```
+回転前  : tagged, metadata, lang, viewerPreferences
+回転後  : tagged, metadata, lang, viewerPreferences   warnings: undefined
+```
+
+タグ付き文書を新経路で全書き直ししても、構造木・XMP・`/Lang`・
+`/ViewerPreferences` は残る。
+
+#### (3) ⚠️ その実行は `TEST_FONT_PATH` 無しだった
+
+```
+Tests  1 failed | 351 passed | 53 skipped (405)
+```
+
+skipped が **2 → 53** に増えている。§3.10.1 の基線（395 passed / 2 skipped）は
+`TEST_FONT_PATH` を立てたときの数字で、立てないと
+**埋め込みフォントとタグ付き PDF の 51 面が測られない**。
+`rotate_pages` の切り替えはフォントに触らないが、**測っていない面を
+合格に数えない**ためにここに書く。直したあとは必ず:
+
+```
+TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test
+```
+
+#### 次にすること
+
+1. **（ホスト）`npm run oracle:update`** — `edit-rotate-20` の golden を採る（27 検体になる）
+2. **（ホスト）`TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test`** —
+   `page-rotate` 8 面 + 直した 1 面で **403 passed / 2 skipped** になるはず
+3. `incremental.ts` の前倒しを決める（3.11.1）
 ---
 
 ## 4. 受入
