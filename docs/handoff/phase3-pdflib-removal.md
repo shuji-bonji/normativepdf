@@ -5,7 +5,8 @@
 - **これが今いちばん大きい。他の 2 件（自前 inflate / reader 移行）の着手条件がここに繋がっている**
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
-> **次に着手するもの = L3'（生成パスを器ごと載せ替える）。読む順は §3.5 → §3.6 → §4。**
+> **次に着手するもの = L4′（編集パス）。読む順は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測) → [§3.8](#38-l4-の段取り案2026-08-15) → §4。**
+> L3′（生成パス）は完了している（§3.6 末尾）。
 > L2（文書モデル）は完了しており、詳細は [`l2-document-model.md`](l2-document-model.md) にある。
 > **着手前に §3.6 末尾の「数えること」を先に済ませること。**
 
@@ -460,13 +461,18 @@ poppler は CID → charset → GID を辿らない実装かもしれず、**寛
 | **L4′** | **編集パス** — 読み側（`loadForEdit`）・ページ複写・`form.ts`（546 行）・注釈・添付・しおり・透かし・ページ番号・増分更新 | ⬅ 次。pdf-lib を import する 20 ファイル・**合計 5,981 行** |
 | **L5′** | **標準 14 書体の幅表** — `@pdf-lib/standard-fonts` の AFM 直読みをやめる | 最後 |
 
-⚠️ **L4′ の入口は `loadForEdit` 1 本**（呼び出し元 22 箇所）。ここを
+⚠️ **L4′ の入口は `loadForEdit` 1 本**（~~呼び出し元 22 箇所~~ → **実測 17 箇所**・
+[§3.7.1](#371-数え直した現在地) で訂正。22 は grep の行数だった）。ここを
 `PdfDocumentEditor.open` に替えると、下流の 20 ファイルが一斉に型で落ちる。
 生成パスのときと同じく、**受け皿の欠落を先に数えてから**着手すること ——
 L3′ では受け皿表の ✅ が 4 回続けて「L2 の受入から見た ✅」だった。
 編集パスで要るのに無いものの候補: 既存ページの読み書き・注釈配列の更新・
 AcroForm の外観生成・`copyPages` 相当のグラフ複写・`/ID` の更新（§14.4）・
 DocMDP 判定・dirty 参照追跡（後ろ 3 つは §6 のとおり writer に残るもの）。
+
+✅ **2026-08-15 に数えた → [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)。**
+候補として挙げていなかった面が 4 つ出た（ページツリー編集 / 既存内容を BDC・EMC で挟む /
+既存構造木への追記 / 書き側 FlateDecode）。決定的な欠落は 4 件。
 
 **撤去し切るときに消えるもの**: `color-pdflib.ts` / `font-manager-pdflib.ts`
 （境界を数えられるように切り出した 2 ファイル）・`normalizeEmbeddedFonts` の
@@ -631,6 +637,758 @@ advance の出所はこちら側にある**。残る穴は**標準 14 書体（�
 `node ../../lib/normativepdf/node_modules/typescript/bin/tsc -p tsconfig.json` で
 normativepdf 側の TS 5.9（純 JS）を借りると型検査もビルドも通る。**借りずに dist を古いまま
 オラクルに掛けると、移行していないバイナリを採点して緑になる。**
+
+## 3.7 L4′ の受け皿を数えた（2026-08-15 実測）
+
+**この節の ✅ / ❌ は「writer が依存している `normativepdf@0.5.0` を、writer の
+`node_modules` から実際に import して呼んだ結果」である。**作業木ではない。
+L3′ で受け皿表の ✅ が 4 回続けて「L2 の受入から見た ✅」だったので、
+各行に**誰の何を満たすか**を書いてある。判定に使った実行スクリプトは §3.7.6 に置いた。
+
+### 3.7.1 数え直した現在地
+
+| 数えたもの | これまでの記載 | 実測（2026-08-15） |
+|---|---|---|
+| `grep -rn "from 'pdf-lib'" src/` | 20 行 | **20 行 / 20 ファイル**（一致） |
+| その 20 ファイルの合計行数 | 5,981 行 | **5,981 行**（一致） |
+| `loadForEdit` の呼び出し元 | 22 箇所 | **17 箇所**（editor 11 / page-ops 6 / incremental 0） |
+| writer が依存する normativepdf | 0.5.0 | 0.5.0（`node_modules` も 0.5.0・`dist/index.d.ts` 43 行） |
+
+🔴 **「呼び出し元 22 箇所」は grep の行数であって呼び出し箇所ではなかった。**
+`grep -rn loadForEdit src/` は 23 行出るが、内訳は **呼び出し 17 + コメント 4 + 定義 1 + import 1**。
+数え直す手順: `grep -c "await loadForEdit(" src/services/{editor,page-ops,incremental}.ts` → **11 / 6 / 0**。
+17 と 22 では「下流がどれだけ一斉に落ちるか」の見積もりが変わる。
+
+### 3.7.2 入口をコーパス 2,917 本で測った
+
+同じバイト列に `PDFDocument.load(bytes, {updateMetadata:false})` と
+`PdfDocumentEditor.open(bytes)` → `save()` を掛けて数えた。
+⚠️ **測ったのは「例外が出ないこと」だけである。** 出力が正しいかは qpdf の面で、ここでは見ていない。
+
+| | 本数 |
+|---|---|
+| pdf-lib が load できた | 2,912 / 2,917 |
+| ↳ `PdfDocumentEditor.open` が落ちる | **14** |
+| ↳ `open` は通るが `save()` が落ちる | **8** |
+| ↳ `open` + `save` とも通る | 2,890 |
+| 逆に normativepdf だけ通る（pdf-lib は暗号化で拒否） | 2 |
+
+落ちる 22 本の拒否理由（すべて条文を名指している）:
+ヘッダ直後の EOL 4 / `xref` が行頭に無い 3 / catalog `/Version` の形 3 /
+部分表の個数 2 / `stream` の後の EOL 3 / `endstream` が来ない 3 /
+xref エントリの EOL 1 / xref 開始語が無い 1 / `/Prev` チェーンの打ち切り 2。
+
+**このうち 21 本は veraPDF / isartor の意図的破損検体である。**
+⚠️ **「破損検体だから落ちて当然」で片づけないこと**（[[fail-specimens-classified-by-name]]）。
+今の writer は 21 本とも編集して保存できている。入口を差し替えると
+**受け付ける入力の範囲が狭くなる**。決めるのは「狭めてよいか」であって、「無害か」ではない。
+
+残る 1 本は破損検体ではない → 3.7.3。
+
+### 3.7.3 🔴 決定的な欠落 1 — 打ち切りより前のリビジョンにあるオブジェクトに届かない
+
+`docs/specimens/dss-pades-5sigs-doctimestamp.pdf`（= 受入検体 **`input-signed-5sigs` の入力そのもの**）を
+両方で開いた実測:
+
+| | pdf-lib | `PdfDocumentEditor` 0.5.0 |
+|---|---|---|
+| 開ける | ✅ | ✅ |
+| `chainStop` | — | **`prev-zero`（offset 335210）** |
+| xref エントリ数 | — | **8** |
+| ページ数 | **1** | **0** |
+| `pageTree().reached` | — | **false** |
+| `save()` | ✅ | **`TruncatedHistoryError` で拒否** |
+| `appendUpdate()` | ✅ | ✅（335,911 バイト） |
+
+**この文書は「ページが 0 本ある文書」として静かに返る。** `pages()` は例外を投げず、
+長さ 0 の配列を返す。`reached: false` は `pageTree()` を呼べば分かるが、`pages()` からは分からない。
+編集パスの `stampPageNumbers` / `addWatermark` / `addAnnotation` は
+**ページ添字から始まる**ので、この検体では「何もしないで成功」になる形が最も起きやすい。
+
+原因は欠陥ではなく**設計の境界**である。0.5.0 は `/Prev 0` を飲まずに `chainStop` で返す
+（[[prev-zero-swallowed-is-a-complete-chain]] の直し）。ただし返したあと、
+**打ち切りより前の節が定義しているオブジェクトへ到達する経路が無い**。
+pdf-lib は xref を信用せず本文も走査するので 1 ページを見つける。
+
+→ **受け皿として要るのは「複数節の xref を重ねて 1 つの表にする読み」**である。
+これは `readXrefChain` が既に節の列を返しているので、その上に載る。**writer 側には置けない**
+（`PdfDocument.xref` は最新節だけを持つ readonly な値で、writer から重ね直す口が無い）。
+
+⚠️ **`collectObjects` も同じ範囲しか見ない。** この検体に掛けると例外を出さず **7 件**を返す。
+`save` が拒否するのは正しく、`collectObjects` を直に呼ぶと拒否を通り抜ける
+（[[gate-bypassing-the-api-it-measures]] と同じ形）。
+
+### 3.7.4 🔴 決定的な欠落 2 — 暗号化文書を断る経路が writer から消える
+
+`loadForEdit` は `PDFDocument.load` が投げる例外の文言を `/encrypt/i` で判定して
+`ENCRYPTED_PDF` を返している（`editor.ts:139-152`）。**つまり暗号化の拒否は pdf-lib 由来である。**
+
+0.5.0 の暗号化拒否は **オブジェクトストリームを読むときだけ**に置かれている
+（`file-parser.js` の `#objectStream`）。実測:
+
+```
+veraPDF test suite 6-1-3-t02-fail-a.pdf
+  trailer /Encrypt : 16 0 R（あり）
+  open             : ok
+  save             : ok（4,164 バイト・出力にも /Encrypt が残る）
+  pdf-lib          : EncryptedPDFError
+```
+
+古典 xref テーブルの暗号化文書は **open も save も通る**。入口を差し替えると、
+writer は暗号化 PDF を「編集できた」ことにして、復号していないストリームをそのまま書き戻す。
+→ **`/Encrypt` の有無で断る判定を writer 側に自前で置く**か、normativepdf 側の拒否を
+`open` に上げるかを先に決める。どちらでもよいが、**決めずに差し替えると拒否が消える**。
+
+### 3.7.5 🔴 決定的な欠落 3 — 既存ページの内容を `BDC … EMC` で挟む断片が作れない
+
+`ensure-tagged.ts` の `wrapPageContentInP` は、**既存の `/Contents` の前に `BDC` だけ・
+後ろに `EMC` だけ**のストリームを足す（`page.pushOperators` 3 箇所・§7.8.2 の配列連結を使う）。
+`ContentStreamBuilder` はこれを**正しく拒否する**。実測:
+
+```
+BDC だけ書いて finish() → ContentStreamError:
+  content stream ends with 1 unclosed bracket(s): mc (R-9.4.1-6 / R-14.6.1-12)
+EMC だけ書く          → ContentStreamError:
+  EMC closes mc, but the innermost open bracket is none
+```
+
+拒否は条文どおりで、緩めるものではない。要るのは**別の受け皿**である ——
+「複数のストリームに分かれた内容を 1 本の内容として扱い、その全体に対して入れ子を検査する」形
+（§7.8.2 は配列の要素を連結して 1 本として解釈すると定めている）。
+`markArtifactOnPage`（`struct-append.ts:271`）も同じ形をしている。
+
+### 3.7.6 🔴 決定的な欠落 4 — 書き側 FlateDecode が無い
+
+編集パスは 2 箇所で `doc.context.flateStream(...)` を呼ぶ:
+
+- `font-conformance.ts:518` — 是正した `FontFile3`（OpenType・CFF charset を identity に直したもの）
+- `pdfa-conformance.ts:176` — sRGB の ICC プロファイル（`/N 3`）
+
+0.5.0 の `encodeStream` は `FlateDecode` を投げる（ADR-0003 §4 の決定どおり）:
+
+```
+FilterError: FlateDecode is not implemented on the write side. ADR-0003 §4:
+compressed output shall come from a fixed-parameter deflate of our own, never CompressionStream
+```
+
+→ 非圧縮で書くと**条文には反しないが、出力サイズが増える**（`/Filter` は §7.3.8.2 で任意）。
+オラクルには `bytes` と `sha256` の差として出る。**ADR-0003 のトリガー 2（書き側 deflate）が
+ここで立つ**ので、L4′ の途中で自前 deflate に着手するか、非圧縮で書くと決めるかを先に選ぶ。
+
+### 3.7.7 受け皿表（編集パスから見た。3 値で書く）
+
+**✅ = 公開表面にあり、writer の `node_modules` から呼んで動いた。**
+**⚠️ = 呼べるが編集パスの用途には足りない。** **❌ = 公開表面に無い。**
+
+| 編集パスの面 | writer 側の呼び出し | 0.5.0 の受け皿 | 判定（誰から見て） |
+|---|---|---|---|
+| 入力を開く | `PDFDocument.load` 1 | `PdfDocumentEditor.open` | ⚠️ 2,890/2,912。打ち切り・暗号化・破損 22 本は 3.7.2〜3.7.4 |
+| 保存 | `doc.save()` 8 | `editor.save()` | ⚠️ `chainStop !== complete` を拒否 |
+| 増分更新 | `incremental.ts` 587 行 | `appendUpdate` / `appendUpdateTo` | ✅ 5 署名検体でも通った |
+| トレーラ編集（`/Info` `/ID`） | `context.trailerInfo` 25 | `setTrailerEntry` / `trailer()` | ✅ 0.5.0 |
+| オブジェクトの取得・差し替え・採番 | `register` 4 / `lookup` 8 / `obj` 6 / `assign` 1 | `get` / `set` / `resolve` / `allocate` | ✅ |
+| 全オブジェクトの列挙 | `enumerateIndirectObjects` 6 | `collectObjects(base)` + `changed()` | ⚠️ **base のみ**。オーバレイとの併合は writer 側で組む。打ち切り文書では 7 件しか返さない |
+| 辞書 → 参照の逆引き | `struct-append.ts:283` | （無し） | ⚠️ 実測で**同一インスタンスが返る**ので `===` で組める（`get(1)` 2 回・`pages()[0].dict` とも一致） |
+| ページツリーを読む | `getPages` 6 / `page.node` 13 / `page.ref` | `pages()` / `PageEntry` / `pageAttribute` | ✅（`ref` が `null` のページ = 直接オブジェクトは書き戻せない。コーパスでの本数は未測定） |
+| **ページツリーを編集** | `addPage` 2 / `setRotation` 1 / 並べ替え・削除 | `withCount` / `checkPageTree` のみ | ❌ **`Kids` を操作する口が無い** |
+| **ページ複写** | `copyPages` 2 / `PDFObjectCopier` 6 | 無し | ❌（L3′ から送られてきたもの） |
+| **AcroForm** | `getForm` 9 / 7 クラス / `form.ts` 546 行 | 無し | ❌ |
+| **外観生成** | `refreshAppearances` | 無し | ❌ |
+| **既存ページに描画を足す** | `drawText` 2 / `getSize` 2（page-number・watermark） | `ContentStreamBuilder` | ⚠️ 新規ストリームは書ける。`/Contents` 配列への追加は writer 側で組む |
+| **既存内容を BDC/EMC で挟む** | `pushOperators` 3 | `ContentStreamBuilder` | ❌ 3.7.5 |
+| **既存の構造木に追記** | `struct-append.ts` 287 行 | `StructTreeBuilder`（新規のみ） | ❌ 既存の `/StructTreeRoot` を読み込む口が無い |
+| ストリームの復号 | `decodePDFRawStream` 3 | `decodeStream` | ⚠️ `resolve` が**同期**（`editor.resolve` は非同期）。間接参照の `/DecodeParms` を持つ検体での影響は未測定 |
+| **ストリームの圧縮** | `flateStream` 2 | `encodeStream` | ❌ 3.7.6 |
+| 埋め込みフォントの是正 | `normalizeEmbeddedFonts` 563 行 | `buildType0Font` / `sniffFontProgram` / `subsetTag` | ⚠️ **新規に組む**ための部品。既存辞書を是正するものではない |
+| オブジェクトのパース | `PDFObjectParser` 1 | `parseObject` / `parseIndirectObject`（引数は `TokenReader`） | ✅ |
+| 出力の型 | `SaveOptions` | `WriteFileOptions` | ✅ |
+
+**❌ が 7 面・⚠️ が 8 面。** ❌ のうち **ページツリー編集 / 既存内容の BDC・EMC /
+既存構造木への追記 / 書き側 Flate の 4 面は、これまでの段取り表に 1 行も無かった**。
+段取り表が挙げていたのは AcroForm・ページ複写・外観生成の 3 面である。
+
+### 3.7.8 まだ測っていないこと（着手前に測るか、測らないと決めること）
+
+✅ **5 件とも 2026-08-15 に測った → [§3.7.10](#3710-378-の-5-件を測った2026-08-15同日)。**
+
+1. **出力の妥当性**。3.7.2 は例外の有無だけを測った。`save` が通った 2,890 本の出力を
+   qpdf に掛けていない（`roundtrip:survey` は別の判定なので、そのまま流用できない）
+2. **`PageEntry.ref === null`（直接オブジェクトのページ）がコーパスに何本あるか**。
+   書き戻せない形なので、編集パスでは 0 本であることを確かめる必要がある
+3. **`decodeStream` の同期 `resolve` で足りない検体が何本あるか**
+4. **`form.ts` 546 行が使う 7 クラスの、実際に必要な振る舞いの列挙**。
+   クラス名を数えただけで中身を数えていない（[[protect-items-not-types]]）
+5. **verify（`@shuji-bonji/pdf-verify-mcp` = normativepdf 0.2.0）**。2 版古いままで、
+   L4′ で normativepdf 側に手を入れると 2 番目の利用者として落ちる
+
+### 3.7.9 再現手順
+
+```sh
+# 現在地
+cd mcp/pdf-writer-mcp
+grep -rn "from 'pdf-lib'" src/ | wc -l                     # 20
+wc -l $(grep -rl "from 'pdf-lib'" src/)                    # 5981
+grep -c "await loadForEdit(" src/services/editor.ts        # 11
+grep -c "await loadForEdit(" src/services/page-ops.ts      # 6
+
+# 入口の比較（コーパス 2,917 本・所要 10 秒程度）
+#   下のスクリプトを mcp/pdf-writer-mcp/ 直下に置いて実行する
+#   （node_modules を解決させるため。採点ではなく 1 度の計測なので scripts/ には入れていない）
+node entry-probe.mjs ../../lib/normativepdf/corpus out.jsonl
+```
+
+```js
+// entry-probe.mjs — pdf-lib が load できる入力のうち、
+// PdfDocumentEditor が open / save できないものを数える。
+import { readFileSync, appendFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { PDFDocument } from 'pdf-lib';
+import { PdfDocumentEditor } from 'normativepdf';
+
+const [root, out] = process.argv.slice(2);
+const files = [];
+(function walk(d) {
+  for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.name.toLowerCase().endsWith('.pdf')) files.push(p);
+  }
+})(root);
+files.sort();
+
+for (const f of files) {
+  const rec = { file: f.slice(root.length + 1) };
+  const bytes = new Uint8Array(readFileSync(f));
+  try { await PDFDocument.load(bytes, { updateMetadata: false }); rec.pdflib = 'ok'; }
+  catch (e) { rec.pdflib = 'err'; rec.pdflibMsg = String(e.message).slice(0, 120); }
+  let ed = null;
+  try { ed = await PdfDocumentEditor.open(bytes); rec.open = 'ok'; rec.chainStop = ed.base.chainStop.kind; }
+  catch (e) { rec.open = 'err'; rec.openMsg = String(e.message).slice(0, 120); }
+  if (ed) {
+    try { await ed.save(); rec.save = 'ok'; }
+    catch (e) { rec.save = 'err'; rec.saveMsg = String(e.message).slice(0, 120); }
+  }
+  appendFileSync(out, JSON.stringify(rec) + '\n');
+}
+```
+
+**2 度回して同じ数字が出ることを確かめてある**（2026-08-15・2,917 / 2,912 / 14 / 8 / 2,890 / 2）。
+
+⚠️ **この節の数字は 2026-08-15 の `node_modules/normativepdf@0.5.0` に対するもの。**
+版を上げたら 3.7.2 と 3.7.7 は測り直す。
+
+### 3.7.10 §3.7.8 の 5 件を測った（2026-08-15・同日）
+
+**5 件とも判定が付いた。うち 2 件は受け皿表の判定が上がり、1 件は欠落 2 の裏付けが増えた。**
+
+#### (1) `save()` の出力は門番が測っているものと同じか → **同じ。バイト同一 2,883/2,883**
+
+`PdfDocumentEditor.save()`（無編集）と `writeFile(collectObjects(doc), doc.trailer, { version: doc.headerVersion })`
+を veraPDF-corpus 2,907 本に掛けて突き合わせた。**成功した 2,883 本すべてでバイト同一**。
+したがって `roundtrip-corpus.mjs` の qpdf 判定はそのまま `save()` に当てはまる。
+
+門番の現在値（2026-08-15 実走・qpdf 10.6.3）:
+
+```
+OK  2881 round-tripped — matches the recorded baseline
+qpdf --check (source vs rewrite): 250/250 introduced nothing new
+  file unreadable: 15   an object unreadable: 6   not measurable (encrypted): 5
+```
+
+⚠️ **qpdf は 250 本の標本である**（`--qpdf-sample 250`）。全 2,881 本は測っていない ——
+この環境では 1 回のコマンドが 45 秒で切れ、背景に回したプロセスも呼び出しの終わりで止まる。
+**残り 2,631 本は判定不能であって合格ではない**（[[undecided-is-not-innocent]]）。
+
+**私の 2,883 と門番の 2,881 の差 2 本を帰属した**: どちらも**暗号化検体**である。
+暗号化検体は 4 本あり、**オブジェクトストリームを持つ 2 本は `save()` も落ちる**が、
+**古典 xref の 2 本は `save()` が通して書き出す**。門番は 4 本とも `not-measurable` に分類している。
+→ **3.7.4（暗号化を断る経路が消える）の裏付けがもう 1 つ増えた**。
+
+🔴 **その過程で、私は自分の計器の誤りを門番の欠陥と読みかけた。**
+最初 `writeFile(objects, trailer)` を**オプション無し**で呼んで比べ、
+2,236 本が「同じ長さで中身が違う」と出た。差は 2 バイトで、`%PDF-1.4` と `%PDF-2.0` ——
+`writeFile` の `version` 既定が `'2.0'` だからである（`file-writer.js:125`）。
+門番は `roundtrip-corpus.mjs:200` で `{ version: source.headerVersion }` を渡しており、
+**間違っていたのは私の呼び方だった**。同じ形を引き継ぎ §5 にも記録してある
+（「違う計器で測って『門番が間違っている』と結論しかけた」）。**2 度目である。**
+
+#### (2) 直接オブジェクトのページは何本あるか → **0 本 / 12,942 ページ**
+
+2,902 本を開いて `PageEntry.ref === null` を数えた。**0 本**。
+`PdfDocumentEditor` は `ref` が `null` のページを書き戻せないが、コーパスにその形は無い。
+
+⚠️ **0 件は検出器が動いていないことでも出る**ので、**反転して確かめた** ——
+`Kids` にページ辞書を直接入れた文書を組んで開くと `ref === null` が 1 本出る。
+検出器は動いている。
+
+#### (3) `decodeStream` の同期 `resolve` で足りるか → **足りる（コーパスの範囲では）**
+
+`decode.js` を読むと、`resolve` が触るのは **`/Filter` と `/DecodeParms`（とその中の
+Predictor 系の整数）だけ**である。`/Length` には使わない —— ストリームの範囲は
+パーサが `resolveStreamLength` で先に解決している。
+
+コーパス 24,445 ストリームの実測:
+
+| 場所 | 間接参照の本数 |
+|---|---|
+| `/Filter` そのもの | **0** |
+| `/Filter` 配列の要素 | **0** |
+| `/DecodeParms` そのもの | **0** |
+| `/DecodeParms` 配列の要素 | **0** |
+| `/DecodeParms` 辞書の項目（`/Columns` 等） | **0** |
+| （参考）`/Length` が間接参照 | 10,497（`resolve` は使わない） |
+
+→ **受け皿表の「ストリームの復号」を ⚠️ から ✅ に上げる。**
+ただし「コーパスに無い」であって「仕様が禁じている」ではない。
+将来 `/DecodeParms` が間接参照の入力が来たら、同期 `resolve` では解けない。
+
+#### (4) `form.ts` が使うのはクラス 7 種ではなく**品目 13 種**
+
+型ではなく、実際に呼んでいる振る舞いで数え直した（[[protect-items-not-types]]）:
+
+| # | 品目 | 呼び出し |
+|---|---|---|
+| 1 | `/AcroForm` からフィールド木を組む | `doc.getForm()` 9 |
+| 2 | 端末フィールドの列挙（§12.7.4.2 の親子継承） | `form.getFields()` 8 |
+| 3 | 完全修飾名で引く | `form.getFieldMaybe()` 3 |
+| 4 | 完全修飾名を返す | `field.getName()` 5 |
+| 5 | 種別の判別 7 種 | `instanceof PDFTextField` 5 / `PDFDropdown` 5 / `PDFOptionList` 5 / `PDFCheckBox` 3 / `PDFRadioGroup` 3 / `PDFSignature` 1 / `PDFButton` 1 |
+| 6 | 値を読む | `getText` 2 / `getSelected` 4 / `getOptions` 6 / `isChecked` 1 |
+| 7 | 値を書く | `setText` 1 / `select` 2 / `check` 1 / `uncheck` 1 |
+| 8 | `/Ff` のビット（Table 227） | `isReadOnly` 1 / `isRequired` 1 |
+| 9 | ウィジェット注釈を取る（`/Kids` か自身） | `field.acroField.getWidgets()` 1 |
+| 10 | `/DA` を読む | `field.acroField.getDefaultAppearance()` 1 |
+| 11 | フィールドの参照と辞書 | `field.ref` 4 / `field.acroField.dict` 2 |
+| 12 | 外観の生成 | `form.updateFieldAppearances()` 2 / `form.getDefaultFont()` 1 |
+| 13 | フラット化 | `form.flatten()` 1（`editor.ts:679`） |
+
+**「7 クラス」で見積もると、5 番だけを数えたことになる。** 実際に自前化するのは
+1〜4（名前の解決 = §12.7.4.2 の `/Parent` と `/T` の連結）と 6〜8（`/V` `/Ff` の読み書き）で、
+**種別の判別は他の 12 品目の上に乗る薄い層**である。
+
+#### (5) verify の版上げは何に当たるか → **`readXrefChain` は使っていない。当たらない**
+
+`pdf-verify-mcp` が `normativepdf` を import しているのは **1 ファイル・1 行**だけだった:
+
+```
+src/services/revision-diff.ts:52
+  import { dictGet, readXrefSectionAt, type XrefEntry, type XrefSection } from 'normativepdf';
+```
+
+引き継ぎ §5 は「0.2.0 → 0.4.0 の間に破壊的変更がある（`readXrefChain` の 3 値化）」と
+書いているが、**verify はその関数を呼んでいない**。使っている 4 つを 0.2.0 と 0.5.0 で比べた:
+
+- 型: `XrefSection` の 5 項目・`readXrefSectionAt` の引数と返り値・`dictGet` の型、**すべて同一**
+- 実測: コーパス 2,917 本の `startxref` で両版の `readXrefSectionAt` を呼び、
+  `kind` / エントリ数 / `selfObjectNumber` / トレーラの鍵集合を突き合わせた ——
+  **両方読めた 2,906 本すべてで同じ形。片方だけ読めた検体 0 本**
+
+→ **verify の 0.2.0 → 0.5.0 は、測った範囲では型でも挙動でも当たらない。**
+L4′ で normativepdf 側に手を入れるとき、**verify が壊れる面は `readXrefSectionAt` の
+1 点だけ**を見ればよい。
+
+⚠️ ただし verify の `revision-diff.ts` は**チェーンを自前で歩いている**（`readXrefSectionAt` を
+繰り返し呼ぶ）。L4′ で 3.7.3 の「複数節を重ねる読み」を normativepdf に入れるなら、
+**verify がその自前の歩きを持ち続けるか、ライブラリ側に寄せるか**をそこで決める。
+
+### 3.7.11 受け皿表の更新（3.7.10 の結果）
+
+| 面 | 前の判定 | 更新後 | 根拠 |
+|---|---|---|---|
+| ストリームの復号 | ⚠️ 同期 `resolve` | **✅** | `/Filter` `/DecodeParms` の間接参照がコーパスに 0 |
+| ページツリーを読む | ✅（`ref` が null は未測定） | **✅**（12,942 ページ中 0 本・検出器は反転で確認） | (2) |
+| 保存 | ⚠️ | ⚠️（変わらず） | 門番の qpdf 判定が転写できることは確かめた。標本は 250 本 |
+
+**残る ❌ は 7 面のまま。⚠️ は 8 → 6 面。**
+---
+
+## 3.8 L4′ の段取り案（2026-08-15）
+
+**まだ 1 行も書いていない。** ここは「どの欠落をどちら側が持つか」と「どの順で移すか」の案で、
+判断の材料はすべて §3.7 の実測と ISO 32000-2 の条文（`pdf-spec-mcp` で確認）である。
+
+### 3.8.0 帰属を決める規則
+
+既に文書にある 2 つの決定をそのまま使う:
+
+- **ADR-0007 §1** — オーサリング層はライブラリの上（= writer 側）
+- **§6** — writer の方針を normativepdf に持ち込まない。`incremental.ts` の `/ID` 更新・
+  DocMDP 判定・dirty 参照追跡は writer に残る
+
+この 2 つから出る規則: **条文が形を定めているものは normativepdf、
+条文が定めていない判断は writer。**
+「壊れたファイルをどう回復するか」は ISO 32000-2 に条文が無い（`damaged` / `reconstruct` で
+検索して該当 0 件）ので、規則の上では writer 側になる。
+
+### 3.8.1 決定的な欠落 4 件の帰属
+
+| # | 欠落 | 帰属 | 根拠 |
+|---|---|---|---|
+| 1 | 打ち切りより前のリビジョンに届かない | **writer** | 回復に条文が無い。§1 が既に「位置の特定と回復方針は writer に残る」と書いている。**新しい API は要らない**（3.8.1.1 で実証） |
+| 2 | 暗号化を断る経路が消える | **writer** | `dictGet(base.trailer, 'Encrypt')` で今日書ける。拒否の方針（断るか・読み取り専用にするか）は writer の判断 |
+| 3 | 既存内容を `BDC … EMC` で挟めない | **normativepdf** | R-7.7.3.3-23 / -25 と R-14.6.1-11 の読み合わせで、検査の単位が決まる（3.8.1.3） |
+| 4 | 書き側 FlateDecode が無い | **どちらでもない — 非圧縮で書くと決める** | 実測した増分が小さい（3.8.1.4） |
+
+#### 3.8.1.1 欠落 1 — 部品は 0.5.0 に揃っている（実証済み）
+
+`PdfDocument` の構築子は**公開されている**:
+
+```ts
+constructor(bytes, origin, headerVersion, version, trailer, xref, chainStop?)
+```
+
+つまり writer 側で「節を拾って重ねた xref」を作り、`PdfDocumentEditor.of(base)` に渡せる。
+`dss-pades-5sigs-doctimestamp.pdf` で実際に通した:
+
+```
+startxref の出現: 8 個（88280 … 335210）
+  節 @334842 は読めない（1 個）
+読めた節: 7 / 重ねた xref エントリ: 127（最新節だけなら 8）
+pages(): 1 / reached: true       ← 差し替え前は 0 / false
+save(): ok 276,949 バイト         ← 差し替え前は TruncatedHistoryError
+```
+
+重ね方の根拠は **§7.5.6**:
+
+> The update's cross-reference section shall include a byte offset to this new copy of the object,
+> overriding the old byte offset contained in the original cross-reference section. When a PDF reader
+> reads the PDF file, **it shall build its cross-reference information in such a way that the most recent
+> copy of each object shall be the one accessed** from the PDF file.
+
+同じ節はこうも言う ——「増分更新の相互参照節は**変更・置換・削除されたオブジェクトの項目だけ**を
+含む」。だから最新節だけでは足りないのは仕様どおりで、**重ねるのは読み手の義務**である。
+
+🔴 **ただしこの実証は「オフセットの昇順 = 古い順」を仮定している。**
+§7.5.6 が言う "most recent" は**チェーンの順**であって、バイト位置の順ではない。
+チェーンが切れている文書ではその順が読めないので、オフセット順は**回復のための推量**である。
+リニアライズドされた文書では先頭に新しい節が来ることがある。
+→ **実装するなら「推量である」ことを返り値に持たせる**（[[prev-zero-swallowed-is-a-complete-chain]]。
+`chainStop` を 3 値にした理由と同じで、回復で組んだ xref を「歩き切った」と同じ顔で返さない）。
+
+⚠️ 署名済み文書ではこの経路の出口は `appendUpdate` のままである。
+`save()`（全書き直し）は署名を無効にする。重ねた xref が要るのは**ページに到達するため**で、
+書き方を変えるためではない。
+
+#### 3.8.1.2 欠落 2 — writer に 1 つ判定を足すだけ
+
+`editor.ts:139-152` は pdf-lib の例外文言を `/encrypt/i` で見ている。
+差し替え後は `PdfDocumentEditor.open` の前に trailer の `/Encrypt` を見る。
+**normativepdf 側は変えない** —— 0.5.0 の拒否はオブジェクトストリームを読むときに置かれていて、
+それはそれで正しい（復号していないバイトを inflate しようとして
+「FlateDecode failed」と誤報するのを避けるため、と実装のコメントにある）。
+
+⚠️ **この 1 行を入れ忘れると、暗号化検体 4 本のうち 2 本を「編集できた」ことにする**（§3.7.10 (1)）。
+
+#### 3.8.1.3 欠落 3 — 検査の単位は「連結後の 1 本」
+
+3 つの条文を並べると、単位が決まる:
+
+| 条文 | 言っていること |
+|---|---|
+| **R-7.7.3.3-22** | `/Contents` の値は単一ストリームか**ストリームの配列**である |
+| **R-7.7.3.3-23** | 配列なら「**すべてを空白 1 つ以上で順に連結して 1 本のストリームを成す**のと同じ効果」 |
+| **R-7.7.3.3-25** | ストリームの分割はトークン境界でのみ起こしてよく、**ページの論理的な内容や構成とは無関係**でなければならない |
+| **R-14.6.1-11** | マーク付きコンテンツの各列は**単一のコンテンツストリームの中に完全に含まれ**なければならない |
+
+**読み合わせると、`ensure-tagged.ts` の現在のやり方は条文に反していない。**
+配列は連結して 1 本を成すので、要素 1 の `BDC` と要素 3 の `EMC` は
+R-14.6.1-11 の言う「単一のコンテンツストリーム」の中にある。
+反しているのは `ContentStreamBuilder` の**検査の単位**のほうで、
+1 要素だけを見て「閉じていない」と断っている。
+
+→ **受け皿は「`/Contents` 配列全体を 1 本として扱い、その全体に R-14.6.1-11/-12 を検査し、
+書くときにトークン境界で要素へ分ける」もの。** R-7.7.3.3-25 が
+「分割は論理と無関係」と言うので、**分け方は書き手が決めてよい**。
+
+🔴 **これを要求するのは 1 関数だけだった。** 数え直すと:
+
+| 関数 | 形 | 受け皿 |
+|---|---|---|
+| `ensure-tagged.wrapPageContentInP` | 既存内容の**前に `BDC`・後ろに `EMC`** | ❌ 跨ぐ |
+| `struct-append.markArtifactOnPage` | 新しく描く内容を `BMC … EMC` で囲む | ✅ **1 本の新規ストリームに収まる** |
+| `watermark` / `page-number` | 新しく描く内容を足す | ✅ 同上 |
+| `annotation` の `/AP /N` | Form XObject（新規ストリーム） | ✅ 同上 |
+
+**代案がある**（決めていない）:
+
+- **(a) 配列で挟む** — 現状と同じ。受け皿 3 を normativepdf に入れる
+- **(b) 既存内容を復号して 1 本に組み直す** — 受け皿は今あるもので足りるが、
+  **元のコンテンツのバイトが変わる**（署名保全の増分更新では使えない）し、
+  圧縮されていた内容を書き戻すので欠落 4 に戻る
+
+#### 3.8.1.4 欠落 4 — 非圧縮で書く（測った増分）
+
+`flateStream` を呼ぶ 2 箇所の増分を測った:
+
+| 対象 | 生 | deflate | 非圧縮にしたときの増分 |
+|---|---|---|---|
+| sRGB ICC プロファイル（`srgb-icc.ts` が生成） | 548 B | 274 B | **+274 バイト** |
+| 埋め込みフォントプログラム（NotoSansJP 全体・CFF） | 4,533,028 B | 3,898,428 B (86.0%) | **+16%**（サブセット後の実測はまだ） |
+
+`/Filter` は §7.3.8.2 で任意なので、非圧縮は条文に反しない。
+veraPDF の受入（PDF/A-3b 146/146 など）は圧縮の有無で変わらない。
+
+→ **ADR-0003 のトリガー 2（書き側 deflate）を L4′ では立てない**ことを提案する。
+自前 deflate は 1 段まるごとの仕事で、それに見合う増分ではない。
+オラクルには `bytes` と `sha256` の差として出るので、**意図した差として lock を単独コミットで更新**する。
+
+⚠️ **サブセット後の FontFile3 の実測がまだ無い。** 上の +16% はフォント全体の比で、
+サブセットは既に小さいので比が変わる。**着手時に 1 検体で測ってから決めること。**
+
+### 3.8.2 残りの ❌ と ⚠️ の帰属
+
+| 面 | 帰属 | 根拠 |
+|---|---|---|
+| ページツリーの編集（`Kids` の追加・削除・並べ替え） | **normativepdf** | §7.7.3 の意味規定。`checkPageTree` / `countCorrections` / `withCount` が**規則を既に持っている**ので、操作だけが無い |
+| ページ複写（`copyPages` / `PDFObjectCopier` 6） | **writer** | `get` / `allocate` / `set` で組める。複写元も `PdfDocumentEditor` になれば COS → COS なので、§6 が禁じた「pdf-lib → COS の変換層」に当たらない |
+| AcroForm（品目 13・§3.7.10 (4)） | **writer** | §12.7 は対話フォーム = オーサリングの層。ADR-0007 §1 の線の上側。名前の解決は R-12.7.4.2（`/T` を PERIOD で連結・`/T` の無い辞書は field ではなく Widget） |
+| 外観の生成（`refreshAppearances`） | **writer** | 同上 |
+| 既存の構造木への追記（`struct-append` 287 行） | **writer** | 既に COS の辞書操作しかしていない。ただし **MCID の採番規則**は `StructTreeBuilder` が持っているので、既存木に足すときの採番をどちらが持つかは 3.8.6 で決める |
+| 全オブジェクトの列挙 | **writer** | `collectObjects(base)` と `changed()` の併合は 5 行 |
+| 辞書 → 参照の逆引き | **writer** | 同一インスタンスが返ることを実測済み（§3.7.7） |
+
+**normativepdf 側に入るのは 2 件だけ**（受け皿 3 = 連結内容ストリーム、ページツリーの編集）。
+残りはすべて writer 側で、しかも公開表面の部品で組める。
+
+### 3.8.3 段取り
+
+⚠️ **この節の図と表は [§3.9.6](#396-段取りの更新383-の差し替え) で更新された**（2026-08-15 同日）。
+0.6.0 の位置が L4′.0 → L4′.3.5 に動き、「ページツリー編集」は不要と分かった。
+
+```mermaid
+graph TD
+  L0["L4′.0 — normativepdf 0.6.0<br/>連結内容ストリーム + ページツリー編集<br/>1 版で出し切る"]
+  L1["L4′.1 — 入口と出口を 2 本にする<br/>回復読み + 暗号化ガード<br/>まだ誰も使わない"]
+  L2["L4′.2 — COS だけの葉 8 ファイル<br/>pdf-version / xmp / pdfa-conformance / outline<br/>attachment / annotation / font-conformance / doc-level"]
+  L3["L4′.3 — 既存ページに足す描画<br/>watermark / page-number"]
+  L4["L4′.4 — タグ<br/>struct-append → ensure-tagged"]
+  L5["L4′.5 — form.ts（品目 13）"]
+  L6["L4′.6 — page-ops<br/>ページツリー編集 + ページ複写"]
+  L7["L4′.7 — 入口を 1 本に戻す<br/>editor / incremental / output<br/>pdf-lib を dependencies から外す"]
+  L8["L5′ — 標準 14 書体の幅表"]
+  L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8
+  L0 -. "受け皿 3 は L4′.4 でだけ要る" .-> L4
+  L0 -. "ページツリー編集は L4′.6 でだけ要る" .-> L6
+```
+
+順序の根拠は**依存の向き**である。20 ファイルの import を数えた:
+
+- **葉（他の pdf-lib 依存ファイルを 1 つも import しない）が 13**:
+  `annotation` `attachment` `color-pdflib` `doc-level` `font-conformance` `font-manager-pdflib`
+  `incremental` `outline` `pdf-version` `pdfa-conformance` `rotation` `struct-append` `xmp`
+- **根は `page-ops`**（誰からも参照されない・`doc-level` `editor` `output` `rotation` を import）
+- `editor` が 14 ファイルを import していて、**ここが最後**になる
+
+| 段 | 中身 | 受入 | `grep` の見込み |
+|---|---|---|---|
+| **L4′.0** | normativepdf 0.6.0 = 連結内容ストリーム + ページツリー編集（`Kids` の操作） | 新 API の単体テスト + `corpus:survey` / `roundtrip:survey` が基準値どおり | 20（動かない） |
+| **L4′.1** | `loadForEditN` / `saveEditedN` を**追加**（既存はそのまま）。writer 側の回復読み + 暗号化ガード | 3.7.2 の 2,890 本 + `input-signed-5sigs` が `pages() === 1` | 20〜21（新ファイルが増える） |
+| **L4′.2** | COS だけの葉 8 ファイル | `npm run oracle`（`TEST_FONT_PATH` 付き）+ 387 テスト | 20 → 12 前後 |
+| **L4′.3** | `watermark` / `page-number` / `color-pdflib` / `rotation` | 同上 + poppler でフォントの面 | 12 → 8 前後 |
+| **L4′.4** | `struct-append` → `ensure-tagged`（(a) か (b) をここで決める） | PDF/UA-1 106/106 を下回らない | 8 → 6 前後 |
+| **L4′.5** | `form.ts` | `form-fill` / `form-tag-then-flatten` の 2 検体 | 6 → 5 |
+| **L4′.6** | `page-ops` + ページ複写 | `edit-merge` / `edit-page-ops` | 5 → 3 |
+| **L4′.7** | `editor` / `incremental` / `output` / `font-manager-pdflib` を新入口へ寄せ、2 本を 1 本に戻す | 受入 §4 の 3 つすべて | **0** |
+| **L5′** | 標準 14 書体の幅表 | 既存の `create-text-std14-17` | 0 のまま |
+
+### 3.8.4 入口と出口を 2 本にする理由
+
+**`loadForEdit` を差し替えると 17 箇所が一斉に落ち、下流 20 ファイルが同時に型で落ちる。**
+段に割るには、移行中だけ入口と出口を 2 本ずつ持つ:
+
+| 旧（pdf-lib） | 新（normativepdf） |
+|---|---|
+| `loadForEdit` → `{ doc: PDFDocument, … }` | `loadForEditN` → `{ editor: PdfDocumentEditor, … }` |
+| `output.saveEdited(doc)` | `output-edited.ts` の `saveEditedN(editor)` |
+
+**L3′ で同じ形を既に作っている** —— 生成パスは `output-created.ts` を別に持ち、
+編集パスの `output.ts` と分けた。L4′.7 で 2 本を 1 本に戻す。
+
+⚠️ **2 本にしている間は、同じ操作が 2 経路になる。** どちらを通ったかを
+**オラクルの検体ごとに記録する**こと ——記録が無いと、移していないサービスを
+「移した」と数える（[[shipped-is-not-used]]）。
+
+### 3.8.5 normativepdf 0.6.0 に載せるもの（1 版で出し切る）
+
+L3′.0 の教訓は「**公開されるまで L3′ は 1 行も型検査を通らない**」だった。
+同じことが起きるので、**L4′ が呼ぶ表面を先に数え終えてから版を切る**:
+
+1. **連結内容ストリーム** — `/Contents` 配列を 1 本として扱い、R-14.6.1-11/-12 を全体で検査し、
+   トークン境界で要素へ分けて書く（3.8.1.3）
+2. **ページツリーの編集** — `Kids` への挿入・削除・並べ替え。`/Count` は既存の `withCount` /
+   `countCorrections` が再計算し、`checkPageTree` が R-7.7.3.2-4（重複）・
+   R-7.7.3.3-2（`/Parent` は間接参照）を検査する
+
+**この 2 つだけ。** 3.8.1 / 3.8.2 で writer に帰属したものは公開表面を増やさない。
+
+⚠️ **0.6.0 を切る前に、L4′.2〜.6 が normativepdf の何を呼ぶかを数えること。**
+L3′ では 4 回続けて「受け皿表に ✅ が付いているのに、生成パスから呼ぶと無い」が起きた。
+今回の §3.7.7 は**編集パスから見て**書いてあるが、**まだ 1 行も書いていないので、
+書き始めてから見つかる欠落はありうる**。見つけたら 0.6.0 に足してから版を切る。
+
+### 3.8.6 決めていないこと
+
+✅ **1 と 4 は [§3.9](#39-386-を測って-060-の表面を確定した2026-08-15) で決めた。5 は測ったうえで「L4′.5 の直前に決める」とした。**
+
+1. **`ensure-tagged` の (a) 配列で挟む / (b) 1 本に組み直す**（3.8.1.3）。
+   (b) を選ぶと受け皿 3 が要らなくなり、0.6.0 は 1 件になる
+2. **既存構造木に追記するときの MCID 採番**を writer と `StructTreeBuilder` のどちらが持つか
+3. **回復読みで組んだ xref を、どの型で「推量である」と表すか**（3.8.1.1 の 🔴）
+4. **サブセット後の FontFile3 を非圧縮にしたときの増分**（3.8.1.4 の ⚠️）
+5. **AcroForm の 13 品目を writer に置くと、reader / verify が同じものを作り直す**かどうか。
+   今は測っていない —— reader / verify がフォームをどう読んでいるかを数えてから決める
+---
+
+## 3.9 §3.8.6 を測って 0.6.0 の表面を確定した（2026-08-15）
+
+**結論を先に**: normativepdf 0.6.0 に載せるのは **1 件だけ**になった。
+§3.8 で 2 件と書いたうちの「ページツリーの編集」は、**呼び出し側を読み直したら要らなかった**。
+
+### 3.9.1 サブセット FontFile3 を非圧縮にしたときの増分（§3.8.6 の 4）
+
+writer と同じ呼び方（`subsetFont(..., { targetFormat: 'sfnt', noLayoutClosure: true })`）で
+NotoSansJP をサブセットし、生と deflate を比べた:
+
+| サブセットの中身 | 生 | deflate | 非圧縮の増分 |
+|---|---|---|---|
+| 短い見出し 1 行（異なり 10 字） | 3,408 | 2,525 (74%) | **+883 B** |
+| オラクルの markdown（異なり 34 字） | 5,708 | 4,234 (74%) | **+1,474 B** |
+| かな全部 + ASCII（271 字） | 45,412 | 37,077 (82%) | **+8,335 B** |
+| かな + 漢字 500 字（676 字） | 87,904 | 76,672 (87%) | **+11,232 B** |
+| かな + 漢字 2,000 字（2,176 字） | 323,684 | 287,973 (89%) | **+35,711 B** |
+
+（参考: sRGB ICC は 548 → 274 で **+274 B**。§3.8.1.4）
+
+🔴 **さらに決定的なことが分かった。生成パスは既に非圧縮で書いている。**
+
+- `cos.ts` の `stream(entries, raw)` は `raw` をそのまま持つ（`/Filter` を付ける口が無い）
+- normativepdf の `buildType0Font` も `raw: program.bytes` で書く
+
+つまり **L3′ の受入（PDF/A-3b 146/146・PDF/UA-1 106/106・PDF/A-4 109/109）は、
+非圧縮の `FontFile3` を持つ出力で通っている。**
+編集パスを同じにするのは**新しい判断ではなく、生成パスと揃えること**である。
+
+→ **欠落 4 の決定: 非圧縮で書く。ADR-0003 のトリガー 2（書き側 deflate）は L4′ では立てない。**
+
+### 3.9.2 reader / verify はフォームの何を使っているか（§3.8.6 の 5）
+
+| | 使っているもの | フィールド木を歩くか |
+|---|---|---|
+| **pdf-reader-mcp** | `doc.catalog.getAcroForm()` → `acroForm.getAllFields()` → `field.getFullyQualifiedName()` / `getPartialName()` / `field.dict` の `/FT` `/V` 生読み（`pdflib-service.ts:337-410`・`analyzeSignatures`） | **歩く**。ただし pdf-lib の**ウィジェットクラス（`PDFTextField` 等）は 1 つも使わない** |
+| **pdf-verify-mcp** | `enumerateIndirectObjects()` を走査して `/FT = Sig` を拾い、**`/T` を部分名のまま**使う（`pdf-parser.ts:324`）。`/AcroForm` は `/XFA` と `/NeedAppearances` の有無だけ（`pdfa-validator.ts:364,374`） | **歩かない** |
+
+→ **重なるのは §3.7.10 (4) の品目 1〜3（`/AcroForm` を取る・端末フィールドを列挙する・
+完全修飾名を組む = R-12.7.4.2）だけ。** 値の読み書き・種別の判別・`/Ff`・外観生成・
+フラット化（品目 5〜13）は writer しか使わない。
+
+⚠️ **今は決めない。** reader の移行は §5 のとおり Phase 3 のあとで、
+**L4′.5（`form.ts`）に着手する時点で `form.ts` が木に何を求めるかを数えてから**
+「normativepdf 0.7.0 に入れる / writer に置く」を決める。
+ここに書いておくのは、**writer に置くと reader が同じものを持つ**という事実である
+（[[promised-coverage-vs-built-coverage]]: 2 番目の消費者を数えずに置くと、あとで二重に作る）。
+
+### 3.9.3 (a)/(b) を決めた → **(a) 配列で挟む**
+
+`ensure-tagged.wrapPageContentInP` を (a) 既存の `/Contents` 配列の前後にストリームを足す /
+(b) 既存内容を復号して 1 本に組み直す のどちらにするか。**(a) を選ぶ。**
+
+根拠 3 つ:
+
+1. 🔴 **`ensureTagged` は `preserveSignatures` に対応している**（`editor.ts:798`。
+   テストも `tagged-incremental.test.ts` にある）。**(b) は増分更新でページ内容そのものを
+   書き直す**ことになり、追記されるのは「足したタグ」ではなく「ページ内容全体」になる
+2. **書き側 FlateDecode が無い**（3.9.1 で非圧縮と決めた）。
+   コーパスのページ内容ストリーム **12,962 本のうち 10,775 本（83%）が `/Filter` を持つ**ので、
+   (b) はその内容を復号して**非圧縮で膨らませて**書き戻す
+   （⚠️ コーパスはほぼ合成の適合検体なので、この 83% は実文書の分布ではない）
+3. **条文が (a) を許している** —— R-7.7.3.3-22（値は単一ストリームか配列）・
+   R-7.7.3.3-23（配列は連結して 1 本を成す）・R-7.7.3.3-25（分割は論理と無関係でよい）。
+   R-14.6.1-11 の「単一のコンテンツストリーム」は**連結後の 1 本**を指す（§3.8.1.3）
+
+### 3.9.4 🔴 ページ複写とページツリー編集は 0.6.0 に要らなかった
+
+§3.8.2 は「ページツリーの編集（`Kids` の追加・削除・並べ替え）は normativepdf」と書いた。
+**呼び出し側を読み直したら、writer は `Kids` を 1 度も編集していなかった。**
+
+`page-ops.ts` の 5 つの操作は**すべて `copyIntoNewDoc`（`page-ops.ts:57`）を通る**:
+
+```
+extract_pages / delete_pages / reorder_pages / split_pdf / merge_pdfs
+  → PDFDocument.create() → dst.copyPages(src, indices) → dst.addPage(p) を繰り返す
+```
+
+つまり要るのは **「空の文書を作る」「グラフを複写する」「末尾に足す」の 3 つだけ**で、
+「途中に挿入する」「削除する」「並べ替える」は 1 つも要らない。
+
+**3 つとも 0.5.0 の公開表面で組めることを実証した**（writer 側 40 行程度）:
+
+```
+checkPageTree の違反: 0
+pages(): 1
+save(): 2,184 バイト
+読み戻し pages(): 1 / MediaBox 継承あり / /Contents 2 要素
+qpdf --check: No syntax or stream encoding errors found（終了コード 0）
+```
+
+使ったのは `PdfDocumentEditor.create()` / `allocate()` / `set()` / `get()` /
+`PdfDocumentEditor.rootPagesRef` / `countCorrections()` / `withCount()` / `checkPageTree()` ——
+**すべて 0.4.0〜0.5.0 で公開済み**。`allocate` で先に置き場所を取ってから中身を書くので、
+循環参照（`/Parent` を含むページ辞書）も 1 度の走査で写せる。
+
+🔴 **§3.8.2 の誤りは「呼び出しの回数だけ数えて、その呼び出しが何をしているかを数えなかった」**。
+`addPage` 4 回・`setRotation` 1 回という数字は取ってあったが、
+**その 4 回が「新規文書の末尾に足す」だけだと確かめていなかった**。
+L3′ の「ページ複写は 2 呼び出しだから小さい」と**同じ形の誤り**である
+（[[protect-items-not-types]] / 数えたのは型と回数で、品目ではない）。
+
+⚠️ この実証は **1 ページの単純な文書 1 本**で取った。
+複数ページ・注釈・構造木を持つ文書での複写は測っていない
+（`doc-level.ts` の `carryDocumentLevel` が引き継ぐ文書レベル要素は別の面）。
+
+### 3.9.5 normativepdf 0.6.0 の表面 = 1 件
+
+| # | 中身 | 条文の根拠 | 消費者 |
+|---|---|---|---|
+| 1 | **連結内容ストリーム** — `/Contents` 配列を 1 本として扱い、R-14.6.1-11 / -12 の入れ子を**連結後の全体**で検査し、書くときにトークン境界で要素へ分ける | R-7.7.3.3-22 / -23 / -25、R-14.6.1-11 / -12 | `ensure-tagged.wrapPageContentInP` 1 関数（L4′.4） |
+
+**これだけ。** §3.8 で挙げた 2 件目（ページツリー編集）は 3.9.4 で不要と分かり、
+3 件目の候補（フィールド木）は 3.9.2 のとおり L4′.5 の直前まで決めない。
+
+⚠️ **0.6.0 を切らずに進める道もある。** writer が
+`/P <</MCID 0>> BDC` を**生バイトのストリームとして**書けば動く。
+ただし `ContentStreamBuilder` の「書けない形は書けない」という保証を、
+その 2 本のストリームについては失う。**1 件だけの版を切るほうが安い**と判断する。
+
+### 3.9.6 段取りの更新（§3.8.3 の差し替え）
+
+**0.6.0 は L4′.0（先頭）ではなく L4′.4 の直前**になる。
+L4′.1〜.3 は **0.5.0 のまま**進められる —— L3′ で「公開されるまで 1 行も型検査を通らない」と
+止まった形は、今回は最初の 3 段には起きない。
+
+| 段 | 中身 | 依存する normativepdf |
+|---|---|---|
+| **L4′.1** | 入口と出口を 2 本にする（`loadForEditN` / `saveEditedN`）+ 回復読み + 暗号化ガード | **0.5.0**（§3.8.1.1 で実証済み） |
+| **L4′.2** | COS だけの葉 8 ファイル | **0.5.0** |
+| **L4′.3** | `watermark` / `page-number`（新規ストリームを足すだけ） | **0.5.0** |
+| **L4′.3.5** | **normativepdf 0.6.0 を公開**（連結内容ストリーム 1 件）・writer の dep を上げる | — |
+| **L4′.4** | `struct-append` → `ensure-tagged`（(a)） | **0.6.0** |
+| **L4′.5** | `form.ts` —— **着手直前に木の形を数えて 0.7.0 か writer かを決める**（3.9.2） | 未定 |
+| **L4′.6** | `page-ops` + ページ複写 | **0.5.0**（3.9.4 で実証済み） |
+| **L4′.7** | `editor` / `incremental` / `output` を新入口へ寄せ、2 本を 1 本に戻す。`pdf-lib` を `dependencies` から外す | — |
+
+⚠️ §3.8.3 の図と表は**この表で置き換わる**。図のほうは残してあるが、
+0.6.0 の位置と「ページツリー編集」の行はここが新しい。
+
+### 3.9.7 まだ決めていないこと（§3.8.6 の残り）
+
+| # | 中身 | いつ決めるか |
+|---|---|---|
+| 2 | 既存構造木に追記するときの **MCID の採番**を writer と `StructTreeBuilder` のどちらが持つか | L4′.4 の着手時 |
+| 3 | 回復読みで組んだ xref を、どの型で「**推量である**」と表すか（§3.8.1.1 の 🔴） | L4′.1 の着手時 |
+| 5 | フィールド木を 0.7.0 に入れるか writer に置くか | L4′.5 の着手直前（3.9.2） |
+
+**1（(a)/(b)）と 4（FontFile3 の増分）は決まった。**
+---
 
 ## 4. 受入
 
