@@ -5,7 +5,8 @@
 - **これが今いちばん大きい。他の 2 件（自前 inflate / reader 移行）の着手条件がここに繋がっている**
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
-> **次に着手するもの = L4′.2（COS だけの葉 8 ファイル）。L4′.1 は完了 → [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15)。**
+> **次に着手するもの = L4′.2。ただし移す単位は「ファイル」ではなく「ツール」だった → [§3.11](#311-l42-着手--移す単位はファイルではなくツールだった2026-08-15)。**
+> 手順は §3.11.5（計器の lock を先に採り直す → 切り替える）。
 > 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
 > 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
@@ -1539,6 +1540,175 @@ qpdf --check (source vs saveOpened): 400/400 introduced nothing new
 |---|---|
 | **L4′.1**（入口と出口を 2 本にする） | ✅ **完了**（2026-08-15）。型検査 0 / **ホスト `npm test` 395 passed・2 skipped** / **biome clean** / コーパス 2,897 開・2,890 書き / qpdf 400 標本で苦情の増加なし |
 | L4′.2（COS だけの葉 8 ファイル） | ⬅ 次 |
+---
+
+## 3.11 L4′.2 着手 — 移す単位は「ファイル」ではなく「ツール」だった（2026-08-15）
+
+### 3.11.1 🔴 §3.8.3 の「COS だけの葉 8 ファイル」は段にならない
+
+§3.8.3 は L4′.2 を「葉 8 ファイル（`pdf-version` / `xmp` / `pdfa-conformance` /
+`outline` / `attachment` / `annotation` / `font-conformance` / `doc-level`）」と書いた。
+**その 8 つは import の向きの葉であって、呼び出しの向きでは `editor.ts` と
+`page-ops.ts` から呼ばれる。** ファイル単位で COS に書き換えると、呼び出し元が一斉に
+型で落ちる —— L4′.1 で「入口を差し替えると 17 箇所が一斉に落ちる」と言ったのと同じ形が、
+1 段内側で再現する。**移す単位はツール 1 本**である。
+
+ツール 17 本が何を呼ぶかを数え直した:
+
+| ツール | 葉のうち使うもの | 葉以外に要るもの |
+|---|---|---|
+| `set_metadata` | xmp | incremental, output |
+| `add_bookmarks` | outline | incremental, output |
+| `add_annotation` | annotation | incremental, output, struct-append |
+| `attach_file` | attachment | incremental, output |
+| `ensure_pdfa` | font-conformance, pdfa-conformance, xmp | incremental, output |
+| `stamp_page_numbers` | — | color, font-manager(-pdflib), incremental, output, page-number, struct-append |
+| `add_watermark` | — | color, font-manager(-pdflib), form, incremental, output, struct-append, watermark |
+| `fill_form` / `tag_form_fields` / `flatten_form` | — | form, output（+ incremental / struct-append） |
+| `ensure_tagged` | — | ensure-tagged, incremental, output |
+| `merge` / `extract` / `delete` / `reorder` / `split` | doc-level | editor, output, ページ複写 |
+| **`rotate_pages`** | **—** | **output だけ** |
+
+🔴 **`incremental.ts` が 11 本中 9 本を止めている。** `preserveSignatures` を持つ
+ツールは、その枝で `buildIncrementalUpdate` を通る。§3.8.3 は `incremental.ts` を
+L4′.7 に置いていたが、**実際には L4′.2 の直後に来ないと他が進まない**。
+（`page-ops.ts` の 6 ツールは `preserveSignatures` を持たないので、この縛りが無い。）
+
+→ **`rotate_pages` が、他の受け皿を 1 つも要らない唯一のツール**だった。
+`/Rotate`（Table 31）を書き換えるだけで、複写も描画もフォントも構造木も要らない。
+**L4′.2 の 1 本目はこれにする。**
+
+### 3.11.2 実装（`src/services/page-rotate.ts`・72 行）
+
+`openForEdit` → `pageAttribute(n, 'Rotate')` で §7.7.3.4 の継承を解決 →
+ページ辞書に `/Rotate` を書く → `saveOpened`。
+旧実装との違いは継承の解決を `page.getRotation()`（pdf-lib）から
+`PdfDocumentEditor.pageAttribute` に替えた 1 点だけである。
+
+⚠️ **まだ `handlers.ts` を切り替えていない。** 理由は 3.11.4。
+
+### 3.11.3 旧実装との A/B（オラクルと同じ digest・33 検体）
+
+`page-ops.rotatePages`（pdf-lib）と `page-rotate.rotatePages`（normativepdf）を
+同じ入力に掛け、`scripts/uc-oracle/digest.mjs` で突き合わせた
+（[[ab-old-implementation-from-git]] の形。ここでは旧実装がまだ木にあるので git から
+復元する必要が無い）:
+
+**差は 32 / 33 本で出て、原因は 2 つだけ。どちらも「新実装が旧実装の挙動を
+再現していない」ものである。**
+
+| 差 | 旧 | 新 | 帰属 |
+|---|---|---|---|
+| `meta.objectCount` が 2 少ない | ObjStm 1 + XRef ストリーム 1 を**常に**足す | 入力が古典テーブルなら古典テーブルで書く | **意図。** `saveOpened` の既定を「入力が使っていた形」にした（`SourceForm`） |
+| `meta.headerVersion` | **常に `%PDF-1.7`** | 入力のヘッダを保つ | **意図。旧実装の欠陥を再現しない** |
+
+🔴 **2 つ目は旧実装の欠陥である。実測:**
+
+```
+Simple PDF 2.0 file.pdf
+  入力  : ヘッダ 2.0 / catalog /Version なし → 実効 2.0
+  旧出力: ヘッダ 1.7 / catalog /Version なし → 実効 1.7
+```
+
+`rotate_pages` は `saveEdited` を `targetVersion` 無しで呼ぶので
+`patchHeaderVersion`（「pdf-lib は常に `%PDF-1.7` を書く」ためにある関数）が
+掛からない。**PDF 2.0 の文書を回転すると、実効版が 1.7 に下がる。**
+1.4 の入力は逆に 1.7 へ上がる（こちらは上位互換なので害は小さい）。
+
+### 3.11.4 🔴 オラクルはこの欠陥を 1 度も見ていなかった
+
+`digestPdf` の返す鍵は `tree` / `sha256` / `meta` の 3 つで、
+**ヘッダの版はどこにも入っていなかった**（catalog の `/Version` は `tree.root` に入る）。
+`specimens.mjs` の `axes.pdfVersion` は**ラベルであって測定ではない**。
+[[saturated-faces-cannot-carry-a-difference]] の形そのものである。
+
+→ **計器を先に直した**: `digest.mjs` の `meta` に `headerVersion` を足した
+（生バイトから `%PDF-n.m` を読む。qpdf を通さないのは、版が qpdf の実装や版に
+依らない事実だから）。上の A/B は直した計器で取っている。
+
+⚠️ **この変更で 26 検体すべての `meta` に鍵が 1 つ増えるので、lock の採り直しが要る。**
+ADR-0006 §7 のとおり **lock の更新は単独のコミット**で、
+**実装の切り替えより前**に行う —— 順序を逆にすると、golden が
+「旧実装の版」を記録しないまま上書きされ、**欠陥が記録に残らない**。
+
+### 3.11.5 次にすること（順序に意味がある）— 1〜2 は済み
+
+1. ~~（ホスト）`npm run oracle:update`~~ ✅ 済み → 3.11.6（分かったことが 2 件あった）
+2. ~~`handlers.ts` の `rotate_pages` を `page-rotate.ts` に向ける~~ ✅ 済み → 3.11.8
+3. **（ホスト）`npm run oracle`** — `edit-page-ops` に 2 因の差が出るので、
+   3.11.3 の表と照合してから lock を更新（これも単独コミット）
+4. `incremental.ts` を L4′.7 から前倒しするかを決める（3.11.1）
+
+⚠️ **オラクルはホストで回す。** lock は qpdf 12.4.0 で採ってあり、
+この環境は 10.6.3 なので、ここで回すと版差が実装の差に混ざる。
+### 3.11.6 lock を採り直して分かったこと（2026-08-15・ホスト実走）
+
+`npm run oracle:update` の結果を差分で読んだ。**26 検体のうち 19 検体は
+`sha256`（= `tree`）まで変わっていた。**
+
+| | 検体数 |
+|---|---|
+| `headerVersion` が増えただけ | **7**（`form-fill` / `form-tag-then-flatten` / `input-*` 5 本） |
+| `sha256` も変わった | **19**（`create-*` / `conformance-*` / `edit-*`） |
+
+🔴 **前回の lock は L3′ の後に採り直されていなかった。**
+capturedAt は `2026-08-14T04:11`、L3′ の実装は `b83fc17` でその後に入っている。
+`digest.mjs` への私の変更は `meta` にしか触っていない（`tree` も `sha256` も
+計算式は同じ）ので、**19 検体の `sha256` の変化はすべて実装（L3′）由来**である。
+差の中身は §3.6 で 383 行として帰属済み。変わらなかった 7 検体は**入力が凍結
+されているもの**で、内訳と一致する（この一致が、帰属が正しいことの裏付けになる）。
+
+→ この採り直しは **2 つの変更を一度に固定している**（L3′ の pin 漏れ + 計器の版の面）。
+コミットの本文に両方を書いた（`fix(gate): ダイジェストにヘッダの版を足し、
+ゴールデンを採り直す`）。
+
+### 3.11.7 🔴 版の格下げは `rotate_pages` 固有ではなかった
+
+`saveEdited` は **14 箇所**から呼ばれ、`targetVersion` を渡すのは
+**`ensure_pdfa` の PDF/A-4 分岐 1 箇所だけ**（`editor.ts:960`）。
+残り 13 箇所は pdf-lib が決め打ちで書く `%PDF-1.7` のまま出る。
+
+採り直した golden がそれを記録した:
+
+| 検体 | `axes.pdfVersion`（ラベル） | 入力のヘッダ | 記録された出力 |
+|---|---|---|---|
+| `input-origin-zero`（`add_annotation`） | `"2.0"` | 2.0（catalog `/Version` 無し） | **1.7** |
+| `input-origin-nonzero`（`add_annotation`） | `"2.0"` | 2.0（同上） | **1.7** |
+| `input-incremental-save`（`set_metadata`） | `"2.0"` | **1.7**（実効 2.0 = catalog `/Version`） | 1.7 |
+
+上 2 本は**実効版が 2.0 → 1.7 に下がっている**（catalog `/Version` が無いので
+格上げ機構でも救われない）。3 本目は入力のヘッダが元々 1.7 なので該当しない。
+
+⚠️ **`axes.pdfVersion` はラベルであって測定ではない。** 「2.0 の軸を測っている」と
+読める場所に、1.7 の出力が 2 本入っていた。
+
+⚠️ **golden は今この欠陥を固定している。** `add_annotation` を新経路へ移すと
+`headerVersion 1.7 → 2.0` の差が出るが、**それは後退ではなく修正**である。
+移す人がこの表と照合できるように、ここに残す。
+
+### 3.11.8 切り替え（2026-08-15）
+
+- `handlers.ts` の `rotate_pages` を `page-rotate.ts` に向けた
+- `page-ops.ts` から旧 `rotatePages`（18 行）と、使わなくなった
+  `rotation.js` の import を落とした
+- `tests/page-rotate.test.ts`（8 面）を足した。素の node で **8/8 通過**:
+  全ページ / ページ指定 / 累積 / **親からの継承（270 + 90 = 0）** /
+  45 を `RangeError` で拒否 / **ヘッダの版を保つ（2.0 → 2.0）** /
+  ObjStm を足さない / `/ModDate` が打たれる
+
+`grep -rn "from 'pdf-lib'" src/` は **20 行のまま**（`page-ops.ts` は複写のために
+`PDFDocument` を引き続き引く）。**この段の進捗はこの数字では測れない** ——
+測るのは**新経路を通るツールの本数で、17 本中 1 本**である。
+
+### 3.11.9 次にすること
+
+1. **（ホスト）`npm run oracle`** — `edit-page-ops` に差が出る。照合表は 3.11.3:
+   `meta.objectCount` が 2 減る（ObjStm + XRef を足さない）/
+   `meta.headerVersion` は `edit-page-ops` の入力が 1.7 なので**変わらないはず**。
+   ほかの検体に差が出たら、それは想定外なので止めて数える
+2. **（ホスト）`npm test`** — `tests/page-rotate.test.ts` の 8 面が乗るので 403 前後
+3. 差を照合したら lock を単独コミットで更新
+4. `incremental.ts` の前倒しを決める（3.11.1 — 11 本中 9 本がここで止まっている）
 ---
 
 ## 4. 受入
