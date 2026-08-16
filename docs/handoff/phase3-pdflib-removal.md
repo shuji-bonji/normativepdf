@@ -6,7 +6,7 @@
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 
 > **次に着手するもの = L4′.2。ただし移す単位は「ファイル」ではなく「ツール」だった → [§3.11](#311-l42-着手--移す単位はファイルではなくツールだった2026-08-15)。**
-> 手順は §3.11.5（計器の lock を先に採り直す → 切り替える）。
+> 1 本目（`rotate_pages`）は完了 → §3.11.8。**2 本目は `incremental.ts`**（§3.12 で前倒しを決めた）。
 > 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
 > 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
@@ -1787,6 +1787,71 @@ TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test
 2. **（ホスト）`TEST_FONT_PATH=$PWD/NotoSansJP-Regular.otf npm test`** —
    `page-rotate` 8 面 + 直した 1 面で **403 passed / 2 skipped** になるはず
 3. `incremental.ts` の前倒しを決める（3.11.1）
+---
+
+## 3.12 `incremental.ts` を前倒しするか（2026-08-15・数えた結果）
+
+§3.8.3 は `incremental.ts` を L4′.7 に置いたが、§3.11.1 で
+**編集ツール 11 本中 9 本がここで止まっている**ことが分かった。移す価値を数えた。
+
+### 3.12.1 588 行の内訳
+
+| 行 | 中身 | 移すとどうなるか |
+|---|---|---|
+| 12 + 33 + 40 | `findOrigin` / `readStartxrefValue` / `readPreviousSection` | **消える** — `PdfDocument.origin` と `readXrefChain` が持っている |
+| 49 + 24 | `parsePreviousTrailer` / `TRAILER_EXCLUDE` | **消える** — `appendUpdate` は `base.trailer` を土台にするので §7.5.6 の「前 trailer の全エントリ」が自動で満たされる（**B-7b がここで解ける**） |
+| 13 + 6 + 10 | `contiguousRuns` / `serializeObject` / `latin1` | **消える** — `writeObject` / `buildXrefStream` / `appendUpdateTo` |
+| 24 | `reserveExistingObjectNumbers` | **消える** — `PdfDocumentEditor.allocate` が全参照を走査して採番する |
+| 162 | `buildIncrementalUpdate` | **大半が消える**（直列化・オフセット計算・xref 書き出し・trailer 組み立て） |
+| 57 | `findDocMdpPermission`（§12.8.2.2） | **残る**（§6: writer の方針） |
+| 14 + 55 | `pageContentDirtyRefs` / `catalogNamesDirtyRefs` | **残る**…が、下記の理由で**要らなくなる公算が高い** |
+| 20 | `updateFileId`（§14.4） | **残る**。`setTrailerEntry('ID', …)` で渡す |
+
+概算で **588 → 150 行前後**。
+
+### 3.12.2 いちばん効くのは行数ではなく「dirty を手で追わなくなる」こと
+
+今の `buildIncrementalUpdate` は
+「`sinceObjectNumber` より大きい番号 **＋ 呼び出し側が渡した `dirtyRefs`**」を書く。
+つまり**既存オブジェクトを変えたら、呼び出し側が申告しなければ追記に載らない**。
+`pageContentDirtyRefs` / `catalogNamesDirtyRefs`（69 行）はその申告を組み立てる道具で、
+`editor.ts` の各ツールが `markDirty(...)` を呼んで回っている。
+
+`PdfDocumentEditor` では、変えるには `set` / `allocate` / `delete` / `setTrailerEntry` を
+通るしかなく、**触ったものがそのままオーバレイ**になる。`changed()` が書く集合そのもので、
+**申告の漏れという欠陥クラスが表現不能になる**。
+
+⚠️ これは「行が減る」より重い。B-22（origin > 0 のオフセット計算）も
+`appendUpdate` 側に寄るので、**同じ計算を 2 か所で持たなくなる**。
+
+### 3.12.3 移す条件と順序
+
+`buildIncrementalUpdate` は pdf-lib の `PDFDocument` を取るので、**単独では移せない**。
+移せるのは「入口が `openForEdit` になったツール」からで、順序はこうなる:
+
+1. `incremental-append.ts`（仮）を書く —— `OpenedForEdit` を取り、
+   `editor.appendUpdate({ xref: opened.form.xref })` を呼ぶ。
+   `/ID` は `setTrailerEntry`、DocMDP 判定は既存の `findDocMdpPermission` を再利用
+2. **preserve 枝を持つツールを 1 本ずつ**新経路へ。`set_metadata` が最小
+   （葉は `xmp` だけ・§3.11.1 の表）
+3. 全部移り終えたら `incremental.ts` から直列化・trailer・xref の部分を落とす
+
+⚠️ **`appendUpdate` の受入は §3.10 で 1 度だけ通してある**（5 署名検体で 335,911 バイト）。
+**前方バイト同一性（ADR-0005 の第一の受入基準）はまだ測っていない** ——
+`tests/incremental.test.ts` が旧経路でそれを測っているので、
+新経路でも同じ検体・同じ判定で測ってから切り替えること。
+
+### 3.12.4 判断
+
+**前倒しする。** 根拠は 3 つ:
+
+1. 編集ツール **11 本中 9 本**がここで止まっている（§3.11.1）
+2. 消える 400 行あまりは**すべて normativepdf と同じ仕事の二重実装**で、
+   そのうち 2 つ（B-7b の trailer 引き継ぎ・B-22 の origin 計算）は
+   **実際に欠陥が出た場所**である
+3. dirty の申告漏れという欠陥クラスが表現不能になる
+
+→ **L4′.2 の 2 本目を `incremental` にする。** §3.8.3 の L4′.7 からここへ動かす。
 ---
 
 ## 4. 受入
