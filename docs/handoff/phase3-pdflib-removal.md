@@ -2653,6 +2653,96 @@ PDF/UA-1 の機械採点は動いていない（後退していない）。**
 
 ---
 
+## 3.21 `ensure_pdfa` の受け皿を数えた —— 0.6.0 の表面が入れ替わった（2026-08-15）
+
+### 3.21.1 数えた結果（欠落 5 + ライブラリの API が要るもの 1）
+
+| 必要な操作 | 行 | 受け皿 | 状態 |
+|---|---|---|---|
+| `declarePdfa`（XMP に `pdfaid` を書く） | 24 | `writeXmpMetadata`（XMP 無し）/ `syncXmpWithInfo(overrides)`（XMP 有り） | ✅ **両枝とも既にある** |
+| 出力の版を 2.0 にする | — | `saveOpened` の `write.version` | ✅ |
+| `/ModDate` の後に走らせる | — | `SaveOpenedExtras.beforeSave` | ✅ |
+| `hasPdfaDeclaration`（自称の有無） | 13 | `decodeStream` + 正規表現 | 🔴 欠落（writer 側で書ける） |
+| `ensureFileIdentifier`（`/ID`・R-14.4-7/-8/-11） | 62 | `setTrailerEntry('ID', …)` + md5 | 🔴 欠落（writer 側で書ける） |
+| `ensureSrgbOutputIntent`（`/OutputIntents` + ICC） | 32 | catalog + `allocate` + `cos.ts` の `stream` | 🔴 欠落（writer 側で書ける） |
+| `findNonEmbeddedFonts`（B-21 の危険表示） | 35 | 無い（`font-conformance.ts` は pdf-lib） | 🔴 欠落（**読むだけ**なので writer 側で書ける） |
+| `stripInfoForPdfa4`（B-20・PDF/A-4 6.1.3-4） | 28 | **トレーラの項目を消す手段が無い** | 🔴🔴 **ライブラリの API が要る** |
+
+`srgb-icc.ts`（ICC プロファイルの生成）は **pdf-lib を import していない**のでそのまま使える。
+
+⚠️ **ICC プロファイルは非圧縮になる。** 旧実装は `context.flateStream(profile, {N:3})` で
+書いており、normativepdf は書き側 Flate を拒む（ADR-0003 §4）。実測 **548 バイト**
+（§3.9.1 の表にある「+274 B」がこの差）。`/Filter` は任意（§7.3.8.2）なので条文上は問題ない。
+
+### 3.21.2 🔴 `setTrailerEntry` では消せない —— null は「無い」ではない
+
+`stripInfoForPdfa4` はトレーラから `/Info` を**外す**。0.5.0 の
+`PdfDocumentEditor` は `setTrailerEntry`（上書き）しか持たない。
+
+`setTrailerEntry('Info', null)` で代用できないのは、**§7.3.7 が「値が null の項目は
+無いものとして扱う」と言っていても、鍵はバイト列に残る**からである。
+PDF/A-4 6.1.3-4 を測る側は「文書情報辞書が**在るか**」を見るので、
+`/Info null` は見えてしまう。**推測で通すべきところではない。**
+
+→ **normativepdf 0.6.0 に `removeTrailerEntry(key)` を足した**（実装済み・下記）。
+
+### 3.21.3 0.6.0 の表面が入れ替わった（§3.9.5 の訂正）
+
+§3.9.5 は 0.6.0 の中身を **「連結内容ストリーム」1 件**と書いた。消費者は
+`ensure-tagged.wrapPageContentInP` **1 関数だけ**である。
+
+🔴 **その 1 関数は §3.20 で 0.5.0 のまま書いた。** §3.9.5 自身が
+「0.6.0 を切らずに進める道もある（生バイトのストリームとして書けば動く）」と
+書いていた道である。実際に書いてみて、`ContentStreamBuilder` では
+`BDC` だけのストリームを作れない（`finish()` が括弧の釣り合いを求める）ことも分かった。
+
+**つまり 0.6.0 の 1 件目は消費者を失った。** そして `ensure_pdfa` を数えたら
+別の 1 件が出た。差し替える:
+
+| # | 中身 | 条文の根拠 | 消費者 | 状態 |
+|---|---|---|---|---|
+| ~~1~~ | ~~連結内容ストリーム~~ | R-7.7.3.3-22/-23/-25 | **消費者無し**（§3.20 で 0.5.0 のまま書いた） | 取り下げ |
+| 1 | **`removeTrailerEntry(key)`** —— トレーラの項目を消す | §7.5.5 Table 15 / §7.3.7 / PDF/A-4 6.1.3-4 | `ensure_pdfa` の `stripInfoForPdfa4` | **実装済み** |
+
+**表面は 1 件のままだが、中身が入れ替わった。** [[the-plan-is-not-the-measurement]] ——
+着手前に数えるのは、この入れ替わりをコミットの後ではなく前に見つけるためである。
+
+### 3.21.4 `removeTrailerEntry` の形
+
+```
+removeTrailerEntry(key: string): void
+```
+
+- `Root` / `Size` / `Prev` は拒む。`Root` と `Size` は Required（Table 15）で、
+  `Prev` は `appendUpdate` が測った位置から書く。`setTrailerEntry` が
+  `Size` / `Prev` を拒むのと同じ理由に `Root` を足した形である
+- 無い鍵を消すのは**エラーにしない**。事後条件は「その鍵を持たない」で、既に成り立っている
+- `dirty` に数える。`appendUpdate` の「オブジェクトを 1 つも名指さない更新」の拒否文にも含める
+- 消したあとに `setTrailerEntry` すれば戻る（同じ overlay の 2 つの操作）
+
+受入（この環境・素の node で 11/11）: 消した鍵が**保存バイト列から消える**こと
+（`/Info` の文字列が 1 つも残らない）・開いたファイル由来の鍵も消せること・
+消してから設定し直せること・無い鍵が無害なこと・3 つの拒否・`dirty` になること。
+vitest（`tests/document-editor.test.ts` に 5 判定）はホストで走らせること。
+
+### 3.21.5 次にすること（順序に意味がある）
+
+1. **（ホスト）normativepdf の `npm test` と `npm run check:fix`**
+2. **（ホスト）normativepdf 0.6.0 を公開**し、`pdf-writer-mcp` の依存を 0.6.0 に上げる
+   （版を上げるのは公開の後。lock / pin の更新は単独コミット）
+3. そのあと `ensure_pdfa` を新経路へ（3.21.1 の欠落 5 件は writer 側だけで書ける）
+
+⚠️ **`ensure_pdfa` を「PDF/A-3b だけ移す」形にはしない。** 移す単位はツールであり
+（§3.11.1 / §3.14.1）、-4 の枝だけ旧経路に残すと `handlers.ts` が 1 つのツールで
+2 つの経路を持つ。0.6.0 を待つほうが安い。
+
+⚠️ **0.6.0 を待つ間に進められるツールはある** —— `add_annotation` /
+`add_watermark` / `stamp_page_numbers` は `/Info` を外さない。
+ただし後の 2 つは埋め込みフォントに触るので、`output-edited.ts` の
+「まだ無いもの: `normalizeEmbeddedFonts`」（§3.13.4）を先に埋める必要がある。
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**

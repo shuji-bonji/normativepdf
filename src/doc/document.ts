@@ -92,6 +92,7 @@ export class PdfDocumentEditor {
   readonly #deleted = new Map<Key, DeletedObject>();
   /** Trailer entries this session set, laid over the ones that were read. */
   readonly #trailer = new Map<string, CosObject>();
+  readonly #trailerRemoved = new Set<string>();
   /** Object numbers that are referenced anywhere, filled in on first allocate. */
   #referenced: Set<number> | null = null;
   #nextNumber: number | null = null;
@@ -358,14 +359,51 @@ export class PdfDocumentEditor {
       );
     }
     this.#trailer.set(key, value);
+    this.#trailerRemoved.delete(key);
+  }
+
+  /**
+   * Remove a trailer entry (§7.5.5 Table 15).
+   *
+   * `setTrailerEntry` can only overwrite. Writing `null` is not the same act:
+   * §7.3.7 says a dictionary entry whose value is null is treated as absent,
+   * but the key is still there in the bytes, and a reader that asks whether the
+   * key is present — as a PDF/A-4 checker does for the document information
+   * dictionary — sees it. Removing it has to remove it.
+   *
+   * Three keys are refused, for the same reason `setTrailerEntry` refuses two:
+   *
+   * - `/Root` is Required (Table 15). A file without it has no catalog and
+   *   cannot be read at all.
+   * - `/Size` is Required and derived; both writers recompute it.
+   * - `/Prev` is the offset of the previous section, written by `appendUpdate`
+   *   from the offset it measured. `save` drops it on its own.
+   *
+   * Removing a key that is not there is not an error: the post-condition is
+   * "the trailer does not carry this key", and it already holds.
+   */
+  removeTrailerEntry(key: string): void {
+    if (key === 'Root' || key === 'Size' || key === 'Prev') {
+      throw new RangeError(
+        `/${key} cannot be removed from the trailer (§7.5.5 Table 15): ` +
+          (key === 'Root'
+            ? 'it is Required — without it the file has no catalog'
+            : key === 'Size'
+              ? 'it is Required and recomputed by the writer over every section'
+              : 'it is the offset of the previous section, written by appendUpdate'),
+      );
+    }
+    this.#trailer.delete(key);
+    this.#trailerRemoved.add(key);
   }
 
   /** The trailer as it stands: what was read, with anything set laid over it. */
   trailer(): CosDict {
-    if (this.#trailer.size === 0) {
+    if (this.#trailer.size === 0 && this.#trailerRemoved.size === 0) {
       return this.base.trailer;
     }
     const entries = new Map(this.base.trailer.entries);
+    for (const key of this.#trailerRemoved) entries.delete(key);
     for (const [key, value] of this.#trailer) entries.set(key, value);
     return { kind: 'dict', entries };
   }
@@ -385,7 +423,12 @@ export class PdfDocumentEditor {
     // A trailer-only change counts. §7.5.6 describes an update as a section
     // naming what changed, and replacing /Info or /ID is a change even when no
     // indirect object moved — refusing it as "nothing happened" would be wrong.
-    return this.#changed.size > 0 || this.#deleted.size > 0 || this.#trailer.size > 0;
+    return (
+      this.#changed.size > 0 ||
+      this.#deleted.size > 0 ||
+      this.#trailer.size > 0 ||
+      this.#trailerRemoved.size > 0
+    );
   }
 
   // -------------------------------------------------------------- exits
@@ -452,9 +495,9 @@ export class PdfDocumentEditor {
     // its own sentence rather than falling through to a confusing inner error.
     if (this.#changed.size === 0 && this.#deleted.size === 0) {
       throw new RangeError(
-        this.#trailer.size === 0
+        this.#trailer.size === 0 && this.#trailerRemoved.size === 0
           ? 'nothing was changed, so there is no incremental update to append (§7.5.6)'
-          : 'only trailer entries were set, so the appended cross-reference section would name ' +
+          : 'only trailer entries were set or removed, so the appended cross-reference section would name ' +
               'no objects (§7.5.6: entries only for objects that have been changed, replaced or ' +
               'deleted). Write the object the entry points at in the same update, or use save()',
       );

@@ -299,6 +299,60 @@ describe('a document created from empty', () => {
     expect(() => doc.setTrailerEntry('Prev', { kind: 'integer', value: 0 })).toThrow(RangeError);
   });
 
+  /**
+   * PDF/A-4 6.1.3-4 forbids the document information dictionary, and a writer
+   * that has only `setTrailerEntry` cannot express that: §7.3.7 makes a null
+   * value *mean* absent, but the key is still in the bytes, and a checker that
+   * asks whether `/Info` is present sees it. So removal is its own operation.
+   */
+  it('removes a trailer entry, and the key is gone from the saved bytes', async () => {
+    const doc = PdfDocumentEditor.create();
+    const infoRef = await doc.allocate({
+      kind: 'dict',
+      entries: new Map<string, CosObject>([['Producer', name('Test')]]),
+    });
+    doc.setTrailerEntry('Info', infoRef);
+    expect(dictGet(doc.trailer(), 'Info')).toBeDefined();
+
+    doc.removeTrailerEntry('Info');
+    expect(dictGet(doc.trailer(), 'Info')).toBeUndefined();
+
+    const bytes = await doc.save();
+    const back = await parsePdf(bytes);
+    expect(dictGet(back.trailer, 'Info')).toBeUndefined();
+    // 🔴 the key itself, not just its value, is absent
+    expect(new TextDecoder('latin1').decode(bytes)).not.toContain('/Info');
+  });
+
+  it('removes an entry that came from the file it opened', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    editor.setTrailerEntry('Info', name('x'));
+    editor.removeTrailerEntry('Info');
+    expect(dictGet(editor.trailer(), 'Info')).toBeUndefined();
+    // setting it again after a removal brings it back — the two are one overlay
+    editor.setTrailerEntry('Info', name('y'));
+    expect(dictGet(editor.trailer(), 'Info')).toEqual(name('y'));
+  });
+
+  it('removing a key that is not there is not an error', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    expect(() => editor.removeTrailerEntry('NotThere')).not.toThrow();
+  });
+
+  it('refuses to remove the three entries a file cannot do without', () => {
+    const doc = PdfDocumentEditor.create();
+    expect(() => doc.removeTrailerEntry('Root')).toThrow(RangeError);
+    expect(() => doc.removeTrailerEntry('Size')).toThrow(RangeError);
+    expect(() => doc.removeTrailerEntry('Prev')).toThrow(RangeError);
+  });
+
+  it('reports a trailer removal as dirty', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    expect(editor.dirty).toBe(false);
+    editor.removeTrailerEntry('Info');
+    expect(editor.dirty).toBe(true);
+  });
+
   it('reads the catalog through a replaced /Root', async () => {
     const doc = PdfDocumentEditor.create();
     const other = await doc.allocate({
