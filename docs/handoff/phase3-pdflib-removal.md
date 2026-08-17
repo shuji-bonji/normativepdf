@@ -2628,7 +2628,10 @@ form-tag-then-flatten           objectCount 56 → 54
 
 ⚠️ **veraPDF の判定はホストでしか出ない。** `conformance-ensure-tagged-ua1` は
 PDF/UA-1 を機械採点する検体で、この環境では verify が undecided になる。
-`npm run oracle` の `verify` 行が `decided` のまま変わらないことを確かめること。
+
+**ホスト実走（2026-08-15）: 461 passed / 0 failed / 2 skipped。オラクルの差は
+2 検体 9 行で、この環境の実測と 1 行ずつ一致した。`verify` の差は 0 行 ——
+PDF/UA-1 の機械採点は動いていない（後退していない）。**
 
 ### 3.20.6 現在地と次
 
@@ -2639,12 +2642,12 @@ PDF/UA-1 を機械採点する検体で、この環境では verify が undecide
 
 次にすること:
 
-1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
-2. （ホスト）`npm run check:fix`
-3. （ホスト）`npm run oracle` — 差は 3.20.4 の 2 検体のはず。
-   **`verify` に差が出たら止めること**（PDF/UA の後退はこの経路の失敗である）
-4. （ホスト）`git worktree prune`（3.20.4 で建てた記録が `.git/worktrees/oldw2` に残る）
-5. 次のツール: `ensure_pdfa`（`declarePdfa` の COS 版。`xmp-cos.ts` に
+1. ~~（ホスト）`npm test`~~ ✅ 461 passed / 0 failed / 2 skipped
+2. ~~（ホスト）`npm run check:fix`~~ ✅ 1 ファイル（`29a8f7c`）
+3. ~~（ホスト）`npm run oracle`~~ ✅ 差は 2 検体 9 行で予測と一致。`verify` の差は 0
+4. ~~（ホスト）`git worktree prune`~~ ✅
+5. **（ホスト）`npm run oracle:update` → lock を単独コミット**
+6. 次のツール: `ensure_pdfa`（`declarePdfa` の COS 版。`xmp-cos.ts` に
    `syncXmpWithInfo` の overrides 経路が既にあるので、足すのは「XMP が無い文書に
    新規作成する」枝だけ）
 
