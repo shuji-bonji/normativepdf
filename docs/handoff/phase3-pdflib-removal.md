@@ -2533,6 +2533,123 @@ TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test
 
 ---
 
+## 3.20 `ensure_tagged` を新経路へ（L4′.2 の 4 本目・2026-08-15）
+
+### 3.20.1 着手前に数えた受け皿（欠落 3 + 使えない受け皿 1）
+
+| 必要な操作 | 受け皿 | 状態 |
+|---|---|---|
+| catalog の読み書き（`/MarkInfo` `/Lang` `/ViewerPreferences` `/StructTreeRoot`） | `dictGet` / `dictGetRaw` + `editor.set` | ✅ |
+| `/Info` の `/Title` の読み書き | `setInfoEntries` / `textOf` | ✅ |
+| ページ列挙と `/StructParents` | `editor.pages()` + `editor.set` | ✅ |
+| 相互参照のために先に番号を採る | `allocate(COS_NULL)` + `set` | ✅ |
+| `/CreationDate` の引き継ぎ（W-6） | `xmp-cos.ts` の `infoCreationDateIso` | ✅ |
+| **XMP を新しく書く**（`setXmpMetadata`） | 無い | 🔴 欠落 1 |
+| **タグ付きかの判定**（`isTagged` / `isMarked`） | 無い（`struct-append.ts` は pdf-lib） | 🔴 欠落 2 |
+| **既存のページ内容を BDC…EMC で包む** | 無い | 🔴 欠落 3 |
+| 構造木（StructTreeRoot / Document / P / ParentTree） | `StructTreeBuilder` はある | ⚠️ **使えない** |
+
+⚠️ **`StructTreeBuilder` が使えない理由**（受け皿があっても形が合わない例）:
+`TaggedStream.contentItem(element, draw)` は**自分で描く**前提で、
+`BDC → draw → EMC` を 1 本のストリームに書く。`ensure_tagged` が包むのは
+**既に存在するバイト列**なので、この形にならない。
+`ContentStreamBuilder` も `finish()` が 1 本の中で括弧の釣り合いを求める
+（R-9.4.1-6 / R-14.6.1-12）ため、`BDC` だけのストリームを作れない。
+構造木は COS で直接書いた（`outline.ts` と同じ判断）。
+
+### 3.20.2 条文（`pdf-spec-mcp` で引いた）
+
+| 要件 | 何を言っているか |
+|---|---|
+| R-14.7.5.2-2 / -4 | 内容項目は BDC…EMC で囲み、属性リストに **MCID** を持つ |
+| R-14.7.5.2-5 | 構造要素の `/K` が整数なら、それは `/Pg` のページにある MCID を指す |
+| R-14.7.5.4-7 / -8 / -18 / -19 | ページの親ツリーの値は**配列**で、MCID をそのまま添字にする |
+| R-14.7.5.4-12 / -17 | ページ辞書に `/StructParents`（配列を引く鍵）を書く |
+| R-14.7.5.4-9〜-11 | `/ParentTreeNextKey` は使用中のどの鍵より大きい整数 |
+| R-14.6.1-11 | marked-content の並びは**単一の内容ストリーム**に収まること |
+| **R-7.7.3.3-23** | `/Contents` が配列なら、**連結して 1 本の内容ストリームとして扱う** |
+
+🔴 **BDC と EMC を別のストリームに置いてよい根拠は R-7.7.3.3-23 である。**
+配列は連結して 1 本として扱われるので R-14.6.1-11 を満たす。
+既存の内容ストリームのバイト列に触らずに包めるのはこのためで、
+「pdf-lib は追記しかできないから」という旧実装の説明よりも条文に近い理由である。
+
+### 3.20.3 書いたもの
+
+| ファイル | 行 | 中身 |
+|---|---|---|
+| `src/services/tagged-cos.ts` | 331 | 判定・包み方・構造木・文書要件 |
+| `src/services/edit-ensure-tagged.ts` | 55 | 入口・DocMDP の判定・出口 2 本 |
+| `src/services/xmp-cos.ts` | +60 | `writeXmpMetadata`（`attachXmp` を `syncXmpWithInfo` と共有） |
+
+旧 `ensure-tagged.ts`（264 行）と `editor.ts` の `ensureTagged`（36 行）は**まだ残す** ——
+`ensure-tagged.ts` の利用者は他に無いが、`editor.ts` は同じファイルの他ツールが
+pdf-lib のままなので、ファイルごと消せるのは最後の利用者が移ったときである。
+
+🔴 `writeXmpMetadata` は**既存の `/Metadata` が間接参照なら同じ番号に書く**。
+旧 `setXmpMetadata` は毎回新しいオブジェクトを登録して catalog を書き換えるので、
+呼ぶたびに 1 つ増え、古い方は参照されないまま残っていた。
+
+### 3.20.4 旧実装との A/B（23 → 18 の内訳を特定した）
+
+`git worktree` で旧 dist を建て、同じ入力に旧・新の `ensureTagged` を掛けて
+qpdf のオブジェクト一覧を突き合わせた。**旧だけにあった 5 つは次のとおり:**
+
+| 旧だけにあるもの | 何 | なぜ |
+|---|---|---|
+| 内容ストリーム 2 本（`q` / `Q`） | 既存内容を囲む退避と復帰 | pdf-lib の `pushOperators` が足す。BDC / EMC は図形状態を変えないので要らない |
+| `FontFile3` の重複 1 本 | font program の Flate 版 | pdf-lib が書き直し、**元の非圧縮コピー（4 312 バイト）が参照されないまま残る** |
+| `ObjStm` + `XRef` ストリーム 2 本 | 保存の形 | pdf-lib が必ず足す。新しい出口は入力の形（`SourceForm`）で書く |
+
+併せて、旧が付けていた**空の `/Annots`** と**空の `/Resources /ExtGState` `/XObject`** も
+出力から消える（どちらも Optional で、空で置く意味は無い）。
+
+オラクル（この環境・qpdf 10.6.3）で動いたのは 2 検体で、どちらも
+`ensure_tagged` を最初の手順に持つものである:
+
+```
+conformance-ensure-tagged-ua1   objectCount 23 → 18
+form-tag-then-flatten           objectCount 56 → 54
+```
+
+### 3.20.5 受入
+
+| | |
+|---|---|
+| typecheck | 0 |
+| 端から端まで（素の node・dist で実行） | **34 / 34** |
+
+34 判定の内訳: 構造木の形（`Document > P × 2`・`/K` が MCID の整数）・
+`ParentTree` の値が配列であること・`/ParentTreeNextKey` = ページ数・
+各ページの `/StructParents`・`/Contents` の先頭が BDC で末尾が EMC であること・
+`/Lang` `/DisplayDocTitle` `/Metadata` の補完・`pdfuaid:part 1`・
+既存 Info の Title が `dc:title` に載ること・title / lang 欠落時の警告・
+`preserveSignatures` の**前方バイト一致**・タグ付き入力での冪等性（構造木を温存）。
+
+⚠️ **veraPDF の判定はホストでしか出ない。** `conformance-ensure-tagged-ua1` は
+PDF/UA-1 を機械採点する検体で、この環境では verify が undecided になる。
+`npm run oracle` の `verify` 行が `decided` のまま変わらないことを確かめること。
+
+### 3.20.6 現在地と次
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 4 本**（`rotate_pages` / `add_bookmarks` / `set_metadata` / `ensure_tagged`） |
+| `grep -rn "from 'pdf-lib'" src/` | **19**（`ensure-tagged.ts` は残置。利用者が消えても、ファイルを消すのは最後にまとめて） |
+
+次にすること:
+
+1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
+2. （ホスト）`npm run check:fix`
+3. （ホスト）`npm run oracle` — 差は 3.20.4 の 2 検体のはず。
+   **`verify` に差が出たら止めること**（PDF/UA の後退はこの経路の失敗である）
+4. （ホスト）`git worktree prune`（3.20.4 で建てた記録が `.git/worktrees/oldw2` に残る）
+5. 次のツール: `ensure_pdfa`（`declarePdfa` の COS 版。`xmp-cos.ts` に
+   `syncXmpWithInfo` の overrides 経路が既にあるので、足すのは「XMP が無い文書に
+   新規作成する」枝だけ）
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
