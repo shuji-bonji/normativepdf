@@ -2743,6 +2743,83 @@ vitest（`tests/document-editor.test.ts` に 5 判定）はホストで走らせ
 
 ---
 
+## 3.22 `ensure_pdfa` を新経路へ（L4′.2 の 5 本目・2026-08-15）
+
+normativepdf **0.6.0 を公開**し、writer の依存を上げてから移した。
+`removeTrailerEntry` を使う最初の場所である。
+
+### 3.22.1 書いたもの
+
+| ファイル | 行 | 中身 |
+|---|---|---|
+| `src/services/pdfa-cos.ts` | 233 | `/ID`・sRGB OutputIntent・`hasPdfaDeclaration`・`stripInfoForPdfa4` |
+| `src/services/font-read.ts` | 74 | `findNonEmbeddedFonts`（**読むだけ**。是正はまだ移していない） |
+| `src/services/edit-ensure-pdfa.ts` | 138 | ツール本体 |
+| `src/services/xmp-cos.ts` | +55 | `declarePdfa`（XMP 有り → overrides で同期 / 無し → 新規作成） |
+
+### 3.22.2 意図して変えた 2 点
+
+**1. ICC プロファイルを非圧縮で書く（548 バイト）。**
+旧実装は `context.flateStream(profile, {N: 3})`。normativepdf は書き側 Flate を拒む
+（ADR-0003 §4）。`/Filter` は任意（§7.3.8.2）で、生成パスも既に非圧縮である（§3.9.1）。
+
+**2. PDF/A-4 で `/Info` を外すとき、オブジェクトの番号も消す。**
+🔴 旧実装は**トレーラの参照を外すだけ**で、pdf-lib が到達不能オブジェクトを書かないので
+結果的に消えていた。新しい出口は xref にある番号をすべて書くので、
+**参照を外すだけでは中身が残る**。実測で旧出力にも Info オブジェクトが残っていることを
+確かめた（下表の `pdfa-4` の 4 つ目）。
+
+### 3.22.3 旧実装との A/B（`git worktree` で旧 dist を建てて突き合わせ）
+
+| フレーバー | 旧 | 新 | 旧だけにあるもの |
+|---|---|---|---|
+| `pdfa-3b` | 16 | 13 | FontFile3 の重複 1 + ObjStm 1 + XRef ストリーム 1 |
+| `pdfa-4` | 16 | 12 | 上の 3 + **Info 辞書 1**（参照は外れていたが中身は残っていた） |
+
+オラクル（この環境）で動いたのは 4 検体で、すべて `ensure_pdfa` を含む:
+
+```
+conformance-attach-pdfa3b     38 → 37
+conformance-ttf-pdfa3b        21 → 19
+conformance-attach-pdfa4-bare 19 → 17
+conformance-attach-pdfa4f     19 → 17
+```
+
+⚠️ **検体ごとの数が上の A/B（−3 / −4）と違うのは、入力が鎖の途中だからである。**
+`attach_file` など前段のツールはまだ旧経路なので、中間ファイルの時点で
+ObjStm / XRef ストリームやフォントの書き直しが済んでいる。差の**種類**は同じで、
+**数**は鎖のどこまでが旧経路かで変わる。
+
+### 3.22.4 受入（この環境で測れた分）
+
+typecheck 0 / 素の node で **32 / 32**。内訳: -3b / -4 / -4f の 3 形・
+冪等（2 回目は「既に `/ID` がある」「既に GTS_PDFA1 がある」と報告）・
+ICC が非圧縮で `/N` 3・548 バイトであること・`pdfaid` の part / conformance / rev・
+**-4 でトレーラから `/Info` が消えること**（OutputIntent 辞書にも `/Info` 鍵があるので
+トレーラだけを見る）・B-21 の危険表示が Helvetica を名指すこと・
+`preserveSignatures` + -4 を `SIGNED_PDF` で断ること。
+
+🔴 **本番の受入は veraPDF である。** PDF/A-3b **146/146**・PDF/A-4 **109/109** が
+基準値（§4）。この環境では verify が undecided になるので、
+ホストの `npm run oracle` で `verify` に差が出たら**止めること**。
+
+### 3.22.5 現在地と次
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 5 本**（`rotate_pages` / `add_bookmarks` / `set_metadata` / `ensure_tagged` / `ensure_pdfa`） |
+| `grep -rn "from 'pdf-lib'" src/` | **19** |
+
+次にすること:
+
+1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
+2. （ホスト）`npm run check:fix`
+3. （ホスト）`npm run oracle` — 差は 3.22.3 の 4 検体のはず。**`verify` に差が出たら止める**
+4. （ホスト）`git worktree prune`（3.22.3 の記録が `.git/worktrees/oldw3` に残る）
+5. 次のツール: `add_annotation`（既存の構造木へ Annot 要素を足す枝が要る・§3.21.5 の測り）
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
