@@ -7,7 +7,7 @@
 
 > **次に着手するもの = L4′.2。ただし移す単位は「ファイル」ではなく「ツール」だった → [§3.11](#311-l42-着手--移す単位はファイルではなくツールだった2026-08-15)。**
 > 1 本目（`rotate_pages`）は完了 → §3.11.8。2 本目の出口（`appendOpened`）も完了 → **§3.13**。
-> 次は **`add_bookmarks`** を新経路へ（§3.15.6）。しおりの COS 版と DocMDP の判定は用意できた。
+> 次は **`set_metadata`**（§3.16.6）。`add_bookmarks` は完了 → §3.16。新経路を通るツールは 17 本中 2 本。
 > 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
 > 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
@@ -2087,6 +2087,94 @@ UTF-16BE の 16 進文字列を書く。新実装は `cos.ts` の `textString` �
 `assertDocMdpAllows(editor, 'metadata-or-outline')` → `appendOpened`。
 これで初めて「1 つのツールが両方の出口を新経路で使う」形になり、
 `outline-pdflib.ts` を消せる。
+---
+
+## 3.16 `add_bookmarks` を新経路へ（2026-08-15）
+
+**これが最初に「1 つのツールが両方の出口を新経路で使う」形**である。
+通常は `saveOpened`（全書き直し）、`preserveSignatures` では
+`appendOpened`（増分更新・§7.5.6）へ行く。
+
+### 3.16.1 出口 2 本で `/ModDate` の扱いが違っていた
+
+書く前に気づいた: 旧経路は preserve 枝で `touchModificationDate` を呼ぶが、
+**`appendOpened` は `/ModDate` を打っていなかった**（§3.13 で書いたときに落とした）。
+`output-edited.ts` の `touchModDate` を輸出して両方の出口で使うようにした。
+
+順序に意味がある —— **`/ModDate` を打つのは `/ID` より先**。
+`/ID` のダイジェストは「この更新が書くオブジェクト」から取るので、
+`/Info` の変更が入っていなければ、同じ内容の更新で同じ `/ID` が出てしまう。
+
+### 3.16.2 `src/services/edit-bookmarks.ts`（57 行）
+
+```
+openForEdit → （preserve なら assertDocMdpAllows('metadata-or-outline'）
+            → setBookmarks（COS）
+            → preserve ? appendOpened : saveOpened
+```
+
+🔴 **`assertDocMdpAllows` はツールが呼ぶ。** 出口は追記するだけで許可レベルを見ない。
+§12.8.2.2 はしおりを「許される変更の種類」に入れていないので、**書く前に断る**。
+
+旧実装（`editor.ts` の `addBookmarks`・28 行）から**消えたもの**:
+
+- **dirty 参照の申告**。旧は catalog の `/Root` を手で `dirty` に積んでいた。
+  `setBookmarks` が `editor.set` を通るので、触ったものがそのまま書く集合になる
+- **`reserveExistingObjectNumbers`**。`PdfDocumentEditor.allocate` が
+  定義の無い番号まで走査して配る
+
+### 3.16.3 `tests/` の grep を先に打った（4 度目は踏まなかった）
+
+`grep -rn "addBookmarks\|outline-pdflib\|countBookmarks\|setBookmarks" src/ tests/ scripts/` を
+**移す前に**打ったら、**テスト 3 本**が `editor.js` から `addBookmarks` を引いていた:
+`preserve-v10.test.ts` / `spec-audit.test.ts` / `doc-level.test.ts`。
+
+所属が変わったので**再輸出はせず**、3 本の import を `edit-bookmarks.js` に向けた
+（`containsSignature` は置き場所だけ変えたので再輸出した —— 区別は §3.11.10 の規則）。
+
+🔴 **この 3 本が新実装の受入になる。** どれも既存の判定で、内容は変えていない:
+
+| テスト | 何を測るか |
+|---|---|
+| `spec-audit` | `/Count` の可視子孫数（開いた親の下の閉じた枝を数えない）とルートの省略 |
+| `preserve-v10` | preserve 枝の**前方バイト同一**と題名の読み戻し |
+| `doc-level` | `extract_pages` が `/Outlines` の消失を報告できること（下流の依存） |
+
+⚠️ **1 件、落ちる筋があった。** `preserve-v10` は題名を
+`(first.lookup(...) as PDFHexString).decodeText()` と読む。新実装は日本語題名を
+**リテラル文字列**（BOM 付き UTF-16BE の八進エスケープ）で書くので、
+実体は `PDFHexString` ではない。**pdf-lib の `PDFString.decodeText()` が BOM を見て
+UTF-16BE として復号する**ことを先に実測し（`'第1章'` が返る）、
+キャストは TypeScript だけの話なので実行時は通ると確かめた。
+
+### 3.16.4 受入（素の node で 12/12）
+
+3 テスト分の筋 + DocMDP の拒否を素の node で走らせて全通過:
+
+```
+A の /Count = 1（B のみ） / B = -2 / ルート = 2
+開いた項目なし → ルートの /Count 省略 / 閉じた A = -1
+incremental フラグ / 前方バイト同一 / 題名 '第1章' が読める
+extract_pages が /Outlines の消失を報告し add_bookmarks を案内
+P=3 の認証署名でもしおりを断る（SIGNED_PDF）
+```
+
+### 3.16.5 現在地
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 2 本**（`rotate_pages` / `add_bookmarks`） |
+| `grep -rn "from 'pdf-lib'" src/` | **20 → 19**（`outline-pdflib.ts` が消えた） |
+| 消したファイル | `src/services/outline-pdflib.ts` |
+
+⚠️ **この環境ではファイルを削除できない**（連結フォルダで `rm` が通らない）ので、
+`src/services/_to_delete/outline-pdflib.ts.removed` に退避してある。
+git には削除として記録済み。**ホストで `_to_delete/` を消すこと。**
+
+### 3.16.6 次にすること
+
+`set_metadata`。要るのは `xmp.ts`（437 行）の COS 化で、これが編集パスで
+いちばん大きい葉である。B-9（Info と `/Metadata` の同期）を含む。
 ---
 
 ## 4. 受入
