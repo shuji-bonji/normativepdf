@@ -2411,6 +2411,110 @@ text string 側は `literal` / `textString` で書いたバイト列を読み戻
 
 ---
 
+## 3.19 `set_metadata` を新経路へ（L4′.2 の 3 本目・2026-08-15）
+
+### 3.19.1 書いたもの
+
+| ファイル | 行 | 中身 |
+|---|---|---|
+| `src/services/cos-read.ts` | 183 | text string の復号（§7.9.2.2.1）と日付の解析（§7.9.4） |
+| `src/services/info-dict.ts` | 48 | `/Info` へ書く 1 か所。`touchModDate` もここへ寄せた |
+| `src/services/xmp-cos.ts` | 177 | `syncXmpWithInfo` / `infoCreationDateIso` の COS 版 |
+| `src/services/edit-metadata.ts` | 66 | ツール本体。出口は `saveOpened` / `appendOpened` の 2 本 |
+
+`buildXmpPacket`（105 行）は pdf-lib に触らないので **`xmp.ts` のまま呼んでいる**。
+`setXmpMetadata` / `declarePdfa` / `applyPdfuaCatalog`（61 行）は
+`ensure_pdfa` / `ensure_tagged` / 生成パスが使い続けるので触っていない。
+
+旧実装（`editor.ts` の `setMetadata`・47 行）は削除した。
+共有ヘルパ `saveWithPreservedSignatures` は**他の 8 ツールが使っている**ので残してある
+（一度まとめて消しかけ、typecheck が 7 か所の未定義で止めた）。
+
+### 3.19.2 旧実装との A/B（違いは 3 点・すべて意図したもの）
+
+旧は pdf-lib の `getTitle()` / `getCreationDate()` に委ねていたので、
+`pdf-lib` を直接呼んで同じ入力を並べた。
+
+| | 一致 | 違い |
+|---|---|---|
+| 日付 19 形 | 18 | 1 |
+| text string 9 形 | 7 | 2 |
+
+| 違い | 旧 | 新 | なぜ |
+|---|---|---|---|
+| UTF-8 BOM（`EF BB BF`） | 復号しない（`U+00EF U+00BB U+00BF …` の 9 文字になる） | 復号する | R-7.9.2.2.1-4（PDF 2.0） |
+| `D:20260231000000` | 3 月 3 日に繰り上げる | `undefined` | 暦に無い日を「読めた」ことにしない。壊れた値を XMP へ複製しない |
+| バイト `0x16` | `U+0017` に写す | そのまま通す | ISO 32000-2 Table D.2 の PDF 欄に写像が無い |
+
+⚠️ **BOM が無いテキスト文字列は PDFDocEncoding であって Latin-1 ではない。**
+`0x18`–`0x1F`（発音区別符号）と `0x80`–`0x9E`（約物・合字）と `0xA0`（ユーロ記号）が違う。
+Table D.2 に無く周囲が割り当て済みの `0x7F` / `0x9F` / `0xAD` は U+FFFD にする。
+
+### 3.19.3 オブジェクト数の差を測った（旧経路を worktree で建て直して比較）
+
+オラクルをこの環境で回すと 2 検体に差が出た。**旧の dist を
+`git worktree` で建て、同じ入力に旧 `setMetadata` と新 `setMetadata` を掛けて、
+qpdf のオブジェクト一覧を突き合わせた**（推測しないため）。
+
+| 検体 | 旧 | 新 | 旧だけにあるオブジェクト |
+|---|---|---|---|
+| `input-incremental-save` | 11 | 9 | `/Type /ObjStm` 1 本 + `/Type /XRef` 1 本 |
+| `edit-bookmarks-annotation-metadata` | 40 | 39 | `/Type /XRef` 1 本 |
+
+pdf-lib は保存のたびに**必ず** ObjStm と XRef ストリームを足す。新しい出口は
+`SourceForm`（入力が使っていた xref の形）で書くので、入力が古典テーブルなら
+古典テーブルのままになる。§3.11.3 で `rotate_pages` について書いたのと同じ差で、
+**§3.17 で `objectCount` を `tree` に移したので、今回は gate に出た。**
+
+同じ実走で `root` / `pages` / `info` は golden と一致している。
+
+🔴 **意図して変えた 1 点（gate には出ない）**: ASCII の題名がリテラル文字列になる。
+旧は `PDFHexString.fromText` で**常に** UTF-16BE の 16 進文字列を書いていた。
+§7.9.2.2 はどちらも許す。オラクルは qpdf の json 経由で読むので**復号後の文字列**しか
+見ておらず、この差は出ない（§3.15.4 と同じ）。
+
+### 3.19.4 受入（この環境で測れた分）
+
+| | |
+|---|---|
+| typecheck | 0 |
+| `cos-read` の判定（素の node） | 38 / 38 |
+| `info-dict` の判定（素の node） | 9 / 9 |
+| 端から端まで（`set_metadata` を dist で実行） | 23 / 23 |
+
+端から端までの 23 判定には次を含む: XMP の `dc:title` 同期・`pdfuaid:part` と
+`dc:language` の保持・未指定欄が Info の現在値を保つこと・XMP の無い文書で警告が
+出ないこと・`preserveSignatures` で**前方バイトが 1 バイトも変わらない**こと・
+DocMDP P=3 が `SIGNED_PDF` で断ること・ASCII がリテラル / 日本語が UTF-16BE になること。
+
+⚠️ **vitest と biome はこの環境で走らない**（macOS 向けの実行ファイルが要る）。
+新しいテストは `tests/cos-read.test.ts`（20 判定）と `tests/info-dict.test.ts`（5 判定）で、
+ホストで走らせること。
+
+### 3.19.5 現在地
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 3 本**（`rotate_pages` / `add_bookmarks` / `set_metadata`） |
+| `grep -rn "from 'pdf-lib'" src/` | **19**（減らない —— `xmp.ts` も `editor.ts` も他の利用者が残っている） |
+
+**ファイル数は「そのファイルの最後の利用者が移った時」にしか減らない。**
+ツール単位で移す限り、途中の段では 19 のまま動かない段が続く。
+
+### 3.19.6 次にすること
+
+1. （ホスト）`npm test` — 新規 25 判定を含む
+2. （ホスト）`npm run check:fix`（この環境では biome が走らない）
+3. （ホスト）`npm run oracle` — 差は 2 検体の `objectCount` だけのはず
+   （`input-incremental-save` 11 → 9 / `edit-bookmarks-annotation-metadata` 40 → 39）。
+   3.19.3 の表と照合してから `oracle:update` を**単独のコミット**で
+4. （ホスト）`git worktree prune` —— 3.19.3 で建てた worktree の記録が
+   `.git/worktrees/oldw` に残っている（この環境からは消せない）
+5. 次のツール。`ensure_tagged` は `xmp.ts` の `setXmpMetadata` を使うので、
+   `xmp-cos.ts` に `setXmpMetadata` の COS 版を足せば 2 本目の利用者が移る
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
