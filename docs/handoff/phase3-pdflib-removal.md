@@ -2800,8 +2800,11 @@ ICC が非圧縮で `/N` 3・548 バイトであること・`pdfaid` の part / 
 `preserveSignatures` + -4 を `SIGNED_PDF` で断ること。
 
 🔴 **本番の受入は veraPDF である。** PDF/A-3b **146/146**・PDF/A-4 **109/109** が
-基準値（§4）。この環境では verify が undecided になるので、
-ホストの `npm run oracle` で `verify` に差が出たら**止めること**。
+基準値（§4）。この環境では verify が undecided になるので、判定はホストで出す。
+
+**ホスト実走（2026-08-15）: 461 passed / 0 failed / 2 skipped。オラクルの差は
+4 検体 4 行で、この環境の実測と数まで一致した。`verify` の差は 0 行 ——
+PDF/A の機械採点は動いていない（宣言だけ書いて適合を落とす、という失敗はしていない）。**
 
 ### 3.22.5 現在地と次
 
@@ -2812,11 +2815,12 @@ ICC が非圧縮で `/N` 3・548 バイトであること・`pdfaid` の part / 
 
 次にすること:
 
-1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
-2. （ホスト）`npm run check:fix`
-3. （ホスト）`npm run oracle` — 差は 3.22.3 の 4 検体のはず。**`verify` に差が出たら止める**
-4. （ホスト）`git worktree prune`（3.22.3 の記録が `.git/worktrees/oldw3` に残る）
-5. 次のツール: `add_annotation`（既存の構造木へ Annot 要素を足す枝が要る・§3.21.5 の測り）
+1. ~~（ホスト）`npm test`~~ ✅ 461 passed / 0 failed / 2 skipped
+2. ~~（ホスト）`npm run check:fix`~~ ✅ 2 ファイル（`b412c29`）
+3. ~~（ホスト）`npm run oracle`~~ ✅ 差は 4 検体 4 行で予測と一致。**`verify` の差は 0**
+4. ~~（ホスト）`git worktree prune`~~ ✅
+5. **（ホスト）`npm run oracle:update` → lock を単独コミット**
+6. 次のツール: `add_annotation`（既存の構造木へ Annot 要素を足す枝が要る・§3.21.5 の測り）
 
 ---
 
