@@ -2164,12 +2164,25 @@ P=3 の認証署名でもしおりを断る（SIGNED_PDF）
 | | |
 |---|---|
 | 新経路を通るツール | **17 本中 2 本**（`rotate_pages` / `add_bookmarks`） |
-| `grep -rn "from 'pdf-lib'" src/` | **20 → 19**（`outline-pdflib.ts` が消えた） |
-| 消したファイル | `src/services/outline-pdflib.ts` |
+| `grep -rn "from 'pdf-lib'" src/` | **20 のまま**（下記） / 退避フォルダを除くと **19** |
+| 消したファイル | `src/services/outline-pdflib.ts`（git 上は削除済み） |
 
 ⚠️ **この環境ではファイルを削除できない**（連結フォルダで `rm` が通らない）ので、
 `src/services/_to_delete/outline-pdflib.ts.removed` に退避してある。
-git には削除として記録済み。**ホストで `_to_delete/` を消すこと。**
+git には削除として記録済みだが、**ファイルは `src/` の下に残っているので
+`grep -rn "from 'pdf-lib'" src/` は 20 を返す。**
+
+🔴 **私はコミット本文に「20 → 19」と書いてから測って、20 だと気づいた。**
+正しい数え方は 2 つあり、両方書く:
+
+```
+grep -rn "from 'pdf-lib'" src/                        → 20  （退避ファイルを含む）
+grep -rn "from 'pdf-lib'" src/ --exclude-dir=_to_delete → 19  （ホストで消したあとの値）
+```
+
+**ホストで `src/services/_to_delete/` を消すと 19 になる。**
+[[counted-lines-recorded-as-call-sites]] —— 数える範囲を書かないと、同じコマンドが
+違う数を返す。
 
 ### 3.16.6 次にすること
 
