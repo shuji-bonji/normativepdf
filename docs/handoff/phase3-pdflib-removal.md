@@ -2824,6 +2824,87 @@ PDF/A の機械採点は動いていない（宣言だけ書いて適合を落�
 
 ---
 
+## 3.23 `add_annotation` を新経路へ（L4′.2 の 6 本目・2026-08-15）
+
+### 3.23.1 受け皿の欠落は 1 件だけだった
+
+| 必要な操作 | 受け皿 | 状態 |
+|---|---|---|
+| 注釈辞書（Table 166）・`/Annots` への追加 | `cos.ts` + 既存パターン | ✅ |
+| 外観 Form XObject | **`ContentStreamBuilder`** | ✅ ここは「自分で描く」場面なので合う |
+| タグ付き判定 | `tagged-cos.ts` の `isTaggedDoc` | ✅ |
+| **既存の構造木へ足す**（OBJR・ParentTree の次の鍵・`/StructParent`・`/Tabs /S`） | 無い | 🔴 欠落 1 |
+| 辞書から参照を逆引きする（`refOf`） | **要らなくなった** | ✅ 消える |
+
+🔴 **`refOf` が丸ごと消えた。** pdf-lib は `lookup` が解決済みの辞書を返すので、
+その辞書の番号を知るには全オブジェクトの走査（`enumerateIndirectObjects`）が要る。
+COS では `dictGetRaw` が参照をそのまま返すので、走査そのものが無くなる。
+
+`ContentStreamBuilder` が**ここでは合う**ことも記しておく。§3.20.1 で合わなかったのは
+「既存のバイト列を包む」形だったからで、道具が悪いのではなく用途が違った。
+
+### 3.23.2 書いたもの
+
+| ファイル | 行 |
+|---|---|
+| `src/services/annotation-cos.ts` | 205 |
+| `src/services/struct-annot.ts` | 243 |
+| `src/services/edit-annotation.ts` | 56 |
+
+### 3.23.3 オラクルに出た差（11 行・3 種類）
+
+**1. 🔴 `headerVersion 1.7 → 2.0`（`input-origin-zero` / `input-origin-nonzero`）**
+
+**旧実装の欠陥の修正である。** pdf-lib は常に `%PDF-1.7` を書くので、
+PDF 2.0 の入力に注釈を足すと**実効版が 2.0 → 1.7 に下がっていた**。
+§3.11.3 の `rotate_pages` と同じ形で、**§3.17 で `headerVersion` を `tree` へ移すまで
+gate はこれを 1 度も見ていなかった**。計器を直した効果が、別のツールで出た。
+
+**2. `/AP /N /Matrix [1,0,0,1,0,0]` が消える** —— 恒等行列は Table 95 の既定値。書かない。
+
+**3. `objectCount` の減少** —— 実測（`git worktree` で旧 dist を建てて突き合わせ）:
+
+```
+Simple PDF 2.0 file.pdf に注釈 1 本   旧 14 → 新 12
+  旧だけ: /Type /ObjStm 1 本 + /Type /XRef 1 本
+```
+
+他のツールで測ったのと同じ組である（pdf-lib が保存のたびに必ず足す）。
+
+⚠️ **途中で 1 度直した。** 外観に**空の `/Resources`** を書いていた。
+Table 95 は Optional で、中身が無いのに空辞書を置くと「資源を宣言している」と
+読める辞書が 1 つ増える。オラクルが `<absent> → {}` として報告したので直した ——
+**gate が実装の誤りを先に見つけた例**である（§3.20.4 で「空の辞書を書かない」と
+書いた直後に、別の場所で同じことをしていた）。
+
+### 3.23.4 受入
+
+typecheck 0 / 素の node で **31 / 31**。内訳: 3 種別（text / highlight / square）の辞書・
+Table 166 の外観必須・`/F` 4（Print）・タグ付きでの OBJR と `/Alt`・
+**ParentTree の鍵が昇順で衝突しないこと**（2 本続けて足しても `/ParentTreeNextKey` が
+1 ずつ進む）・`/Tabs /S`（7.18.3-1）・`/StructParent`・alt 無しの警告・
+タグ無し文書で構造木を作り始めないこと・`preserveSignatures` の前方バイト一致。
+
+### 3.23.5 現在地と次
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 6 本** |
+| `grep -rn "from 'pdf-lib'" src/` | **19** |
+
+次にすること:
+
+1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
+2. （ホスト）`npm run check:fix`
+3. （ホスト）`npm run oracle` — 差は 3.23.3 の 4 検体 11 行のはず。
+   **`verify` に差が出たら止める**（`input-signed-preserve` は署名の検体である）
+4. （ホスト）`git worktree prune`（3.23.3 の記録が `.git/worktrees/oldw4` に残る）
+5. 次のツール: `add_watermark` / `stamp_page_numbers` は**埋め込みフォントに触る**ので、
+   先に `output-edited.ts` の「まだ無いもの: `normalizeEmbeddedFonts`」（§3.13.4）を埋める。
+   それを避けるなら `attach_file`（§14.13 の添付・フォントに触らない）が次に軽い
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
