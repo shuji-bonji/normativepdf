@@ -2304,6 +2304,113 @@ conformance-tagged-ua1（create_markdown_pdf → add_bookmarks・しおり 1 本
 
 ---
 
+## 3.18 `set_metadata` の受け皿を数えた（着手前・2026-08-15）
+
+🔴 **この節は実装の前に書いている。** 冒頭の決めごと（着手前に受け皿の欠落を数える）に従う。
+
+### 3.18.1 「437 行の葉」は移す単位ではなかった
+
+`xmp.ts` は 437 行あるが、pdf-lib に触るのはその一部である。
+
+| 関数 | 行数 | pdf-lib に触るか | `set_metadata` が使うか | 他の利用者 |
+|---|---|---|---|---|
+| `buildXmpPacket` | 105 | **触らない**（純粋な文字列組み立て） | 間接的に使う | `output-created.ts` |
+| `infoCreationDateIso` | 9 | `doc.getCreationDate()` | 使う | `ensure-tagged.ts` |
+| `syncXmpWithInfo` | 93 | 触る | **使う** | なし（`editor.ts` だけ） |
+| `setXmpMetadata` | 18 | 触る | 使わない | `ensure-tagged.ts` / `output.ts` |
+| `declarePdfa` | 25 | 触る | 使わない | `editor.ts`（`ensure_pdfa`） |
+| `applyPdfuaCatalog` | 18 | 触る | 使わない | 生成パス |
+
+**`set_metadata` のために COS 化が要るのは `syncXmpWithInfo` + `infoCreationDateIso` の
+102 行**で、105 行の `buildXmpPacket` はそのまま使える。
+`setXmpMetadata` / `declarePdfa` / `applyPdfuaCatalog` の 61 行は
+`ensure_pdfa` / `ensure_tagged` / 生成パスの利用者が残っているので**今回は触らない**
+（移す単位はツールである = 3.11.1・3.14.1 と同じ）。
+
+`set_metadata` 側でもう 1 つ要るのは Info の 5 項目（`title` / `author` / `subject` /
+`keywords` / `creator`）の書き込みで、旧実装は `doc.setTitle()` 等に委ねている。
+
+### 3.18.2 受け皿の表（数えた結果 = 欠落 2）
+
+| 必要な操作 | 受け皿 | 状態 |
+|---|---|---|
+| Info の取得・不在なら新設 | `dictGet(editor.base.trailer,'Info')` → `editor.get` / `set` / `allocate` / `setTrailerEntry` | ✅ `output-edited.ts` の `touchModDate` が同じ形で使っている |
+| Info への text string の書き込み | `cos.ts` の `textString`（§7.9.2.2） | ✅ |
+| catalog `/Metadata` が ref か直接かの判別 | `dictGetRaw`（生）と `dictGet`（解決） | ✅ |
+| 既存 XMP の復号 | `/Filter` 有り → `decodeStream` / 無し → `stream.raw` | ✅ |
+| 新しい `/Metadata` ストリームの組み立て | `cos.ts` の `stream()` | ✅ `output-created.ts` が使用中 |
+| 同一 ref への差し替え（catalog を触らない） | `editor.set(ref, …)` | ✅ |
+| `/Metadata` が直接オブジェクトのとき登録 | `editor.allocate` → catalog を `set` | ✅ |
+| **text string の復号**（Info の現在値を XMP へ運ぶため） | **無い** | 🔴 **欠落 1** |
+| **PDF の日付の解析**（`/CreationDate` → ISO 8601） | **無い** | 🔴 **欠落 2** |
+
+**欠落は 2 件で、どちらも §7.9 の「読む向き」である。** 書く向き（`textString` /
+`pdfDate`）は既にあり、読む向きだけが無い。旧実装はこの 2 つを pdf-lib に
+委ねていた（`doc.getTitle()` / `doc.getCreationDate()`）。
+
+### 3.18.3 どこに置くか（normativepdf 0.6.0 の表面は 1 項目のまま）
+
+書く向きの `textString` / `literal` は **writer の `cos.ts`** にある。
+読む向きだけを normativepdf へ上げると、対になる 2 つが別のパッケージに分かれる。
+**だから読む向きも `cos.ts` の隣に置く**（`cos-read.ts`）。0.6.0 の表面は 1 項目のまま。
+
+### 3.18.4 条文（`pdf-spec-mcp` で引いた）
+
+**text string の復号 — §7.9.2.2.1**
+
+| 要件 | 何を言っているか |
+|---|---|
+| R-7.9.2.2.1-2 | text string は PDFDocEncoding / UTF-16BE / **(PDF 2.0) UTF-8** のいずれか |
+| R-7.9.2.2.1-3 | UTF-16BE は先頭 2 バイトが 254, 255（`FE FF`） |
+| R-7.9.2.2.1-4 | UTF-8 は先頭 3 バイトが 239, 187, 191（`EF BB BF`） |
+| R-7.9.2.2.1-5 | 補助文字（2 バイトを超える文字）を扱えること = サロゲート対 |
+
+⚠️ **BOM が無いときは PDFDocEncoding であって Latin-1 ではない。**
+`0x18`〜`0x1F` と `0x80`〜`0x9F` が Latin-1 と違う（Table D.2）。
+バイトをそのまま `String.fromCharCode` に渡すと、この範囲だけ黙って別の文字になる。
+書く向きの `literal` が「PDFDocEncoding で書ける範囲だけを通す」と決めているので、
+読む向きも同じ表を持つ必要がある。
+
+**日付の解析 — §7.9.4**
+
+| 要件 | 何を言っているか |
+|---|---|
+| R-7.9.4-2 | `D:YYYYMMDDHHmmSSOHH'mm'`、空白を含まない text string |
+| R-7.9.4-12 | `D:` と `YYYY` は必須。以降の各欄は**前の欄が全部あるときだけ**あってよい |
+| R-7.9.4-14 / -15 | 時差の `'` は `HH` があるときだけ、時差の `mm` は `'` があるときだけ |
+| R-7.9.4-16 | `MM` と `DD` の既定は 01、他の数値欄の既定は 0 |
+| R-7.9.4-17 | UT の情報が無ければ **GMT とみなす** |
+| R-7.9.4-18 | 時差の指定があってもなくても、日付の残りは**現地時刻**である |
+
+### 3.18.5 着手前に決めた受入
+
+旧実装は pdf-lib の `getCreationDate()` / `getTitle()` に委ねているので、
+**自前の解析が旧実装と同じ答えを返すことを先に確かめる**（3.14.3・3.15.3 と同じ A/B）。
+形は少なくとも次を並べる:
+
+```
+D:20260815123045+09'00'   時差あり
+D:20260815123045Z         Z
+D:20260815123045-05'30'   負の時差
+D:20260815123045          UT 情報なし → GMT（R-7.9.4-17）
+D:2026                     年だけ → MM/DD は 01、他は 0（R-7.9.4-16）
+D:202608                   年月
+（壊れた値）                undefined を返す = XMP へ複製しない
+```
+
+text string 側は `literal` / `textString` で書いたバイト列を読み戻して
+**往復が一致すること**、および `FE FF` / `EF BB BF` / BOM なしの 3 形。
+
+### 3.18.6 次にすること
+
+1. `cos-read.ts`（text string の復号 + 日付の解析）と、その A/B
+2. `xmp-cos.ts`（`syncXmpWithInfo` の COS 版・`buildXmpPacket` はそのまま呼ぶ）
+3. `edit-metadata.ts`（`openForEdit` → Info の 5 項目 → 同期 → 出口 2 本）
+4. `handlers.ts` の `set_metadata` を差し替え、オラクルで
+   `edit-bookmarks-annotation-metadata` の差を読む
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
