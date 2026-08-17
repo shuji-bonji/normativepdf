@@ -2885,7 +2885,45 @@ Table 166 の外観必須・`/F` 4（Print）・タグ付きでの OBJR と `/Al
 1 ずつ進む）・`/Tabs /S`（7.18.3-1）・`/StructParent`・alt 無しの警告・
 タグ無し文書で構造木を作り始めないこと・`preserveSignatures` の前方バイト一致。
 
-### 3.23.5 現在地と次
+### 3.23.5 🔴 `npm test` が見つけた 2 つの欠陥（オラクルは見ていなかった）
+
+ホストの `npm test` が **8 件**落ちた。原因は 2 つで、**どちらも実装の側**である。
+オラクルは 1 行も動かなかった —— 文字列の符号化と字句の形は qpdf の json を通すと
+消えるので、**gate はこの種の誤りを構造的に見られない**（§3.15.4 の再確認）。
+
+**1. `textString` の UTF-16BE が「リテラル文字列」のままだった。**
+符号化（§7.9.2.2: PDFDocEncoding か UTF-16BE か）と**字句の形**（§7.3.4:
+リテラル `(…)` か 16 進 `<…>` か）は別の決めごとである。L3′ で `textString` を
+書いたとき、UTF-16BE のバイト列に `form: 'literal'` を付けていた。
+読めることは読めるが、`(\376\377N\000…)` と 8 進エスケープが並び、
+**同じ内容が 2 通りの見え方になる**。16 進に統一した。
+
+**2. `/ID` に「16 進表記の ASCII」を書いていた**（L4′.1 で入れた欠陥）。
+MD5 は 16 バイトなのに、32 文字の 16 進**表記**をバイト列として書いていたため、
+`<…>` の中身が 64 桁になっていた。§14.4 の判定（`toHaveLength(32)`）が捕まえた。
+`incremental-append.ts` と `pdfa-cos.ts` の 2 か所を直した。
+
+🔴 **2 は `add_annotation` を新経路に載せて初めて表に出た。** 旧経路は
+pdf-lib の `PDFHexString.of(hex)` が 16 バイトを書いており、`preserveSignatures` の
+経路がまだ旧出口だったので、L4′.1 で入れた欠陥が 4 段のあいだ隠れていた。
+
+**gate の役割分担がはっきりした:**
+
+| gate | 見るもの | 今回の欠陥 |
+|---|---|---|
+| 差分オラクル | qpdf を通した**構造**（`root`/`pages`/`info`・`objectCount`・`headerVersion`） | **見えない**（字句の形は json で消える） |
+| `npm test` | writer が書いた**バイト列**と、pdf-lib という別の読み手 | **両方を捕まえた** |
+
+判定側も 3 件直した（実装は変えていない）: `outline-cos.test.ts`（§3.15 で私が
+リテラル形式を固定していた）・`incremental.test.ts` の `readAnnotContents`
+（`PDFHexString` だけを数え、空の `/Contents` を数え落としていた）・
+`struct-append.test.ts` の `/Alt`（16 進の桁を**大文字**で期待していた。
+§7.3.4.3 は大小どちらも許し、normativepdf は小文字で書く）。
+
+**ホスト実走（最終）: 461 passed / 0 failed / 2 skipped。
+オラクルの差は 4 検体 11 行で、この環境の実測と一致。`verify` の差は 0。**
+
+### 3.23.6 現在地と次
 
 | | |
 |---|---|
@@ -2894,12 +2932,12 @@ Table 166 の外観必須・`/F` 4（Print）・タグ付きでの OBJR と `/Al
 
 次にすること:
 
-1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
-2. （ホスト）`npm run check:fix`
-3. （ホスト）`npm run oracle` — 差は 3.23.3 の 4 検体 11 行のはず。
-   **`verify` に差が出たら止める**（`input-signed-preserve` は署名の検体である）
-4. （ホスト）`git worktree prune`（3.23.3 の記録が `.git/worktrees/oldw4` に残る）
-5. 次のツール: `add_watermark` / `stamp_page_numbers` は**埋め込みフォントに触る**ので、
+1. ~~（ホスト）`npm test`~~ ✅ 461 passed / 0 failed（3.23.5 の往復のあと）
+2. ~~（ホスト）`npm run check:fix`~~ ✅ 5 ファイル（`1fdd22c`）
+3. ~~（ホスト）`npm run oracle`~~ ✅ 差は 4 検体 11 行。`verify` の差は 0
+4. ~~（ホスト）`git worktree prune`~~ ✅
+5. **（ホスト）`npm run oracle:update` → lock を単独コミット**
+6. 次のツール: `add_watermark` / `stamp_page_numbers` は**埋め込みフォントに触る**ので、
    先に `output-edited.ts` の「まだ無いもの: `normalizeEmbeddedFonts`」（§3.13.4）を埋める。
    それを避けるなら `attach_file`（§14.13 の添付・フォントに触らない）が次に軽い
 
