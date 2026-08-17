@@ -3099,6 +3099,101 @@ pdf-lib の `copyPages` が内部でやっていたことを、条文の側か�
 
 ---
 
+## 3.26 ページ操作 5 本を新経路へ（L4′.2 の 8〜12 本目・2026-08-15）
+
+### 3.26.1 書いたもの
+
+| ファイル | 行 | 中身 |
+|---|---|---|
+| `src/services/page-ops-cos.ts` | 236 | merge / split / extract / delete / reorder |
+| `src/services/doc-level.ts` | 470（書き直し） | 採取・引き継ぎ・喪失警告を COS の上へ |
+| `src/services/cos-copy.ts` | 193（§3.25 で先に書いた） | グラフの複写 |
+
+`doc-level.ts` は**新しいファイルを作らず書き直した**。利用者が `page-ops` 1 つ
+（と判定 1 本）しか無いので、並べて置くと同じ表が 2 つになる。
+`detect` は `CatalogView`（catalog を 1 回だけ読んだ見え方）を取る形にした ——
+merge のループ内で catalog を解決し直さないためである。
+
+旧 `page-ops.ts` は削除した（この環境では消せないので `_to_delete/` に退避。
+ホストで `rm -rf src/services/_to_delete` すると `grep` が 17 になる）。
+
+### 3.26.2 🔴 意図して直した 2 点
+
+**1. 出力の版を入力に合わせる（§7.5.2）。**
+旧実装は pdf-lib の `create()` が書く `%PDF-1.7` に固定で、**PDF 2.0 の文書から
+ページを抜き出すと実効版が 1.7 に下がっていた**。`rotate_pages`（§3.11.3）・
+`add_annotation`（§3.23.3）に続いて **3 度目の同じ欠陥**である。
+
+**2. `/Creator` を発明しない。**
+旧出力の Info には次が入っていた:
+
+```
+/Creator (pdf-lib (https://github.com/Hopding/pdf-lib))
+```
+
+pdf-lib の `create()` が `updateInfoDict()` を呼び、`/Creator` が無ければ
+**自分の名前を書く**ためである（`PDFDocument.js:1335`・実測）。
+入力にその値は無い。利用者の文書に道具の名前が残るのは、
+「入力に無いものを出力に足さない」という編集パスの約束に反する。
+
+⚠️ **途中で 1 度直した。** 新しい出口は Info に触らないので `/ModDate` が消えていた。
+§14.3.3 Table 349 の「最後に変更された日時」はこの操作で生まれるので、
+書く前に `touchModDate` を通すようにした（オラクルは日付を伏せるので**出ない差**である ——
+気づいたのは Info を直接見比べたからで、gate ではない）。
+
+### 3.26.3 旧実装との A/B とオラクル
+
+`git worktree` で旧 dist を建てて突き合わせた（1 ページ抜き出し）:
+
+```
+旧 13 → 新 10
+  旧だけ: FontFile3 の重複 1 + ObjStm 1 + XRef ストリーム 1
+```
+
+他のツールと同じ 3 つである。オラクル（この環境）で動いたのは 3 検体で、各 3 行:
+
+| 検体 | 差 |
+|---|---|
+| `edit-merge` | `/info /Creator` 消滅 / `objectCount` 23 → 17 / `/root /Lang` 18 0 R → en |
+| `edit-page-numbers` | 同上（35 → 31） |
+| `edit-page-ops` | 同上（15 → 10） |
+
+`/Lang` の行は、旧が運んだ値を**間接オブジェクトに格上げ**していたのに対し、
+新は直接の文字列のまま運ぶ差である。Table 29 は `/Lang` に間接を求めていない。
+検体ごとの `objectCount` の減り方が A/B（−3）と違うのは、鎖の長さ（ページ数・
+フォント数・前段のツール）で複製されるものの数が変わるためである。
+
+### 3.26.4 受入
+
+typecheck 0 / 素の node で **15 / 15**: 抜き出しの順序が指定どおり・
+全ページ削除の拒否・順序の重複検査・merge の合計ページ数と先頭の Title・
+split の 2 ファイルとページ数・**PDF 2.0 の入力が 2.0 のまま**・
+添付が引き継がれること（B-10b）・`checkPageTree` の違反 0。
+
+### 3.26.5 現在地と次
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 12 本** |
+| `grep -rn "from 'pdf-lib'" src/ --exclude-dir=_to_delete` | **17** |
+
+残り 5 本は 2 組:
+
+| 組 | ツール | 要るもの |
+|---|---|---|
+| フォント | `add_watermark` / `stamp_page_numbers` | `font-conformance.ts` の是正（B-14 / W-2 / W-3 / W-4）と `font-manager` の埋め込み |
+| フォーム | `fill_form` / `flatten_form` / `tag_form_fields` | `form.ts`（AcroForm・外観の再生成・§12.7） |
+
+次にすること:
+
+1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
+2. （ホスト）`npm run check:fix`
+3. （ホスト）`npm run oracle` — 差は 3 検体 9 行のはず
+4. （ホスト）`git worktree prune` と `rm -rf src/services/_to_delete`
+5. 次の組を決める前に、それぞれの受け皿を数える
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
