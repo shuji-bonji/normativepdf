@@ -7,7 +7,7 @@
 
 > **次に着手するもの = L4′.2。ただし移す単位は「ファイル」ではなく「ツール」だった → [§3.11](#311-l42-着手--移す単位はファイルではなくツールだった2026-08-15)。**
 > 1 本目（`rotate_pages`）は完了 → §3.11.8。2 本目の出口（`appendOpened`）も完了 → **§3.13**。
-> 次は `set_metadata` を新経路へ（§3.13.5）。
+> 次は **`add_bookmarks`** を新経路へ（§3.14.1 で `set_metadata` より小さいと分かった）。
 > 読む順は [§3.10](#310-l41-着手--入口と出口を-2-本にした2026-08-15) → [§3.9.6](#396-段取りの更新383-の差し替え) → §4。
 > 受け皿の実測は [§3.7](#37-l4-の受け皿を数えた2026-08-15-実測)、帰属と段取りは [§3.8](#38-l4-の段取り案2026-08-15)。
 > L3′（生成パス）は完了している（§3.6 末尾）。
@@ -1947,6 +1947,67 @@ setTrailerEntry 有り: AAAA… / CCCC…
 2. **`set_metadata` を新経路へ**（§3.11.1 の表で最小 —— 葉は `xmp` だけ）。
    preserve 枝は `appendOpened`、通常枝は `saveOpened`
 3. `xmp.ts` を COS 版にする（`set_metadata` が呼ぶのはここだけ）
+---
+
+## 3.14 DocMDP の判定を COS へ（2026-08-15）
+
+### 3.14.1 🔴 最初に移すツールは `set_metadata` ではなかった
+
+§3.11.1 は「`set_metadata` が最小（葉は `xmp` だけ）」と書いた。**葉の数を数えて、
+葉の大きさを数えていなかった**。読み直すと:
+
+| ツール | 要る葉 | その行数 | XMP を触るか |
+|---|---|---|---|
+| `set_metadata` | `xmp.ts` | **437 行** | 触る（B-9: Info と `/Metadata` を同期） |
+| `add_bookmarks` | `outline.ts` | **155 行** | **触らない** |
+
+`add_bookmarks` は `setBookmarks(doc, …)` を呼んで catalog の `/Outlines` を差し替えるだけで、
+XMP には触れない（`editor.ts` を読んで確認）。**最初に移すのは `add_bookmarks`。**
+
+⚠️ [[counted-lines-recorded-as-call-sites]] と同族。「葉が 1 つ」は同じでも、
+中身は 437 行と 155 行だった。**数える単位を決めてから比べる。**
+
+### 3.14.2 `src/services/doc-mdp.ts`（134 行）
+
+`incremental.ts` の `findDocMdpPermission`（57 行）と `editor.ts` の
+`assertDocMdpAllows` を COS の上に置き直した。**判定は writer の方針**（§6）なので
+normativepdf には持ち込まない —— ライブラリは §12.8.2.2 が何と書いてあるかを知る必要が無く、
+writer が「どの変更を断るか」を決める。
+
+経路は §12.8.2.2 の定義どおり:
+catalog → `/AcroForm` → `/Fields` →（`/Kids` を降りながら）→ 署名フィールドの `/V` →
+`/Reference` で `/TransformMethod` が `/DocMDP` のもの → `/TransformParams` → `/P`。
+`/P` が無ければ **2**（Table 257 の既定）。
+
+⚠️ **旧実装に無かったものを 1 つ足した: 訪問済みの参照を覚える。**
+`/Kids` が輪になっている文書で止まらなくなるのを防ぐ。正しい文書では結果は変わらない。
+
+### 3.14.3 旧実装との A/B（7 形すべて一致）
+
+```
+  ok   none      旧=(なし)  新=(なし)     署名が無い
+  ok   approval  旧=(なし)  新=(なし)     TransformMethod が DocMDP でない
+  ok   p1        旧=1      新=1
+  ok   p2        旧=2      新=2
+  ok   p3        旧=3      新=3
+  ok   no-p      旧=2      新=2          Table 257 の既定
+  ok   nested    旧=1      新=1          /Kids の下にネストした署名
+一致 7 / 7
+```
+
+`tests/doc-mdp.test.ts` を足した（`it.each` 7 + 断る／通す 4 = **11 本**）。
+素の node で `assertDocMdpAllows` まで含めて **15 の判定すべて通過**。
+
+🔴 **この判定は出口が持たない。** `incremental-append.ts` は追記するだけで、
+**呼ぶのは各ツールの責任**である。移すツールごとに `assertDocMdpAllows` を
+先に呼ぶこと —— 忘れると認証署名の許可レベルを見ないまま追記する。
+
+### 3.14.4 次にすること
+
+1. **`outline.ts` を COS 版にする**（155 行・`/Outlines` の木と `/Count` の符号 = §12.3.3 Table 153）
+2. **`add_bookmarks` を新経路へ** —— 通常枝は `saveOpened`、preserve 枝は
+   `assertDocMdpAllows('metadata-or-outline')` → `appendOpened`
+3. そのあと `xmp.ts`（437 行）→ `set_metadata`
 ---
 
 ## 4. 受入
