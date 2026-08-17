@@ -1627,6 +1627,14 @@ Simple PDF 2.0 file.pdf
 （生バイトから `%PDF-n.m` を読む。qpdf を通さないのは、版が qpdf の実装や版に
 依らない事実だから）。上の A/B は直した計器で取っている。
 
+🔴 **この段落は間違っている。訂正は 3.17。**
+`meta` は `run.mjs` の `compare()` が見ていない —— 記録するだけである。
+つまり `meta` に足した `headerVersion` は**受入の対象になっていなかった**。
+上の A/B は私が `meta` を手で読んだ数字で、**gate は同じ差を報告しない**。
+2026-08-15 に `headerVersion` と `objectCount` を `tree` へ移した（3.17）。
+以降、この文書の他の節にある `meta.headerVersion` / `meta.objectCount` は
+`tree.headerVersion` / `tree.objectCount` と読むこと。
+
 ⚠️ **この変更で 26 検体すべての `meta` に鍵が 1 つ増えるので、lock の採り直しが要る。**
 ADR-0006 §7 のとおり **lock の更新は単独のコミット**で、
 **実装の切り替えより前**に行う —— 順序を逆にすると、golden が
@@ -2186,8 +2194,114 @@ grep -rn "from 'pdf-lib'" src/ --exclude-dir=_to_delete → 19  （ホストで�
 
 ### 3.16.6 次にすること
 
-`set_metadata`。要るのは `xmp.ts`（437 行）の COS 化で、これが編集パスで
+🔴 **先に 3.17。** この段のあと「差なし」の報告と手元の実測が食い違い、
+**gate が `meta` を比べていない**ことが分かった。計器を直すのが先である。
+
+そのあと `set_metadata`。要るのは `xmp.ts`（437 行）の COS 化で、これが編集パスで
 いちばん大きい葉である。B-9（Info と `/Metadata` の同期）を含む。
+---
+
+## 3.17 🔴 計器に足したのに、何も測っていなかった（2026-08-15）
+
+### 3.17.1 予測が外れた向きが、いつもと逆だった
+
+`add_bookmarks` を新経路に載せたあと、`conformance-tagged-ua1` と
+`edit-bookmarks-annotation-metadata` に差が出ると予測した。
+**ホストの `npm run oracle` は「27 検体・差なし」を返した。**
+
+手元で再現したら、差は実在した:
+
+```
+conformance-tagged-ua1（create_markdown_pdf → add_bookmarks・しおり 1 本）
+  入力              : 30 オブジェクト
+  新経路の出力      : 32 オブジェクト  （+2 = /Outlines 1 + 項目 1）
+  lock の golden    : 35 オブジェクト  （旧 pdf-lib 経路）
+```
+
+`dist/` は最新だった。つまり **gate が −3 を報告しなかった**。
+
+### 3.17.2 比べている場所を読んだ
+
+`run.mjs` の `compare()`（411〜481 行）が突き合わせているのは 7 つだけである:
+
+| 比べる | 比べない |
+|---|---|
+| `status` / `structure.status` / `sha256`（= `tree`）/ `responses` / `qpdfCheck` / `verify` / `signatures` | **`meta`** |
+
+`meta` は 262 行で記録されるが、`compare()` に 1 行も出てこない。
+`digest.mjs` の `meta` のコメント（「伏せた値は消さずに脇に置く」）がそのまま
+仕様であり、**脇に置いたものは受入に入らない**。
+
+🔴 **したがって 3.11.4 で「計器を先に直した」と書いた変更は、何も測っていなかった。**
+`meta.headerVersion` は人が読める記録が 1 つ増えただけで、
+版が 2.0 → 1.7 に下がっても gate は緑を返す。
+[[saturated-faces-cannot-carry-a-difference]] を直したつもりで、
+**面を 1 つ増やして比べない場所に置いた**のが実際に起きたことである。
+
+### 3.17.3 直したこと（`digest.mjs`・計器だけ）
+
+`headerVersion` と `objectCount` を `meta` から **`tree` へ移した**。
+`tree` は `JSON.stringify` して `sha256` を取る対象で、
+`pageCount` / `encrypted` という同じ形のスカラが既に入っている。
+
+移したあとの `meta` は `producer` / `creator` の 2 つだけになる。
+
+**計器が動くことの確認**（同じ文書の先頭 8 バイトだけを `%PDF-1.7` に書き換えた）:
+
+```
+2.0: tree.headerVersion=2.0  sha256=28a24acf0e5701f0…
+1.7: tree.headerVersion=1.7  sha256=78fcdbdb97287cc9…   差が出る
+```
+
+### 3.17.4 隠れていた差を数えた（この環境で実走・版差の注意つき）
+
+`node scripts/uc-oracle/run.mjs` をこの環境（qpdf 10.6.3）で回し、
+**lock の `meta.objectCount`（qpdf 12.4.0 で採取）と、今の `tree.objectCount` を
+突き合わせた。**
+
+| | 検体数 |
+|---|---|
+| 一致 | **25** |
+| 違う | **2** |
+| 数が無い（`unavailable` → 別要因で測定に転じた検体） | 1（`input-signed-5sigs`） |
+
+違った 2 本は**どちらも `add_bookmarks` を含む検体**である:
+
+| 検体 | 旧（golden） | 新 | 差 |
+|---|---|---|---|
+| `conformance-tagged-ua1` | 35 | 32 | **−3** |
+| `edit-bookmarks-annotation-metadata` | 41 | 40 | **−1** |
+
+同じ実走で `diffTrees` が出した行は、27 検体すべて
+`/headerVersion: <absent> → …` と `/objectCount: <absent> → …` の 2 行だけだった。
+**`root` / `pages` / `info` は golden と一致している。**
+つまり差は「どこからも参照されないオブジェクトの数」だけである。
+
+⚠️ **3 つが何だったかは特定していない。** 旧経路（`outline-pdflib.ts`）は
+削除済みで、旧バイトを作れない。**測っていない原因を書かない**
+（ObjStm や XRef ストリームだろうという推測は書かない）。
+確実に言えるのは「新経路は到達可能な構造を変えずに、オブジェクトを 3 つ少なく書く」。
+
+**副産物**: 25/26 が qpdf 10.6.3 と 12.4.0 で一致した。
+`objectCount` を `tree`（= 受入の対象）に置いてよい根拠になる。
+ただし `objectCount` は qpdf の json から数えるので、
+`headerVersion`（生バイト）と違い**読み手に依る値である**ことは残る。
+
+### 3.17.5 次にすること（順序に意味がある）
+
+1. **この計器の変更だけを単独でコミットする**（ADR-0006 §7）
+2. **（ホスト）`npm run oracle:update`** — 27 検体すべての `sha256` が変わる。
+   帰属は**計器だけ**である。根拠: 直前のホスト実走が「27 検体・差なし」で、
+   `tree` の中身が他に変わっていないことを示している
+3. **（ホスト）`npm run oracle`** — 差なしを確認
+4. ホストで `rm -rf src/services/_to_delete` と
+   `git gc --prune=now ; rm -rf .git/_stale`（3.16.5）
+5. `set_metadata`（`xmp.ts` 437 行・B-9 を含む）
+
+⚠️ **これ以降、面を足すときは `tree` に置く。** `meta` は人が読む記録であり、
+受入ではない。面を足したら「それが動くこと」（値を変えると `sha256` が変わること）を
+その場で 1 回確かめる —— 3.17.3 の 2 行がその形である。
+
 ---
 
 ## 4. 受入
