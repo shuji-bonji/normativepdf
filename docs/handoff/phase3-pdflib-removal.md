@@ -2494,12 +2494,22 @@ DocMDP P=3 が `SIGNED_PDF` で断ること・ASCII がリテラル / 日本語�
 **ホスト実走（2026-08-15）**: 410 passed / 0 failed / 53 skipped（合計 463）。
 判定の総数は 427 → 463 で **+36** ——`cos-read` 31 + `info-dict` 5 と一致する。
 
-🔴 **ただし skip が 2 → 53 に増えている。** 増えた 51 本は
+🔴 **ただし skip が 2 → 53 に増えていた。** 増えた 51 本は
 `describe.skipIf(!process.env.TEST_FONT_PATH)` などフォント依存の組で、
-**この実走では `TEST_FONT_PATH` が設定されていなかった**（前回の実走は 425 passed / 2 skipped）。
-実装の後退ではないが、[[undecided-is-not-innocent]] のとおり
-**測れなかったものを緑に数えない** —— フォント依存の 51 本は
-`TEST_FONT_PATH=... npm test` で測り直すこと。
+その実走では `TEST_FONT_PATH` が設定されていなかった。
+[[undecided-is-not-innocent]] のとおり**測れなかったものを緑に数えない**ので測り直した。
+
+🔴 **測り直しの指示を私が間違えた。** `TEST_FONT_PATH=./NotoSansJP-Regular.otf` と
+相対パスで書いたところ、**42 件が落ちた**。原因は実装ではなく指示で、
+`TEST_FONT_PATH` はテストがそのまま `fontPath` に渡すため
+`validation.ts:36`（`must be an absolute path`）で止まる。正しくは:
+
+```
+TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test
+```
+
+**最終（2026-08-15・絶対パス）: 461 passed / 0 failed / 2 skipped（37 ファイル）。**
+残る 2 skip は qpdf / poppler に依る組である。
 
 ### 3.19.5 現在地
 
@@ -2513,15 +2523,13 @@ DocMDP P=3 が `SIGNED_PDF` で断ること・ASCII がリテラル / 日本語�
 
 ### 3.19.6 次にすること
 
-1. （ホスト）`npm test` — 新規 25 判定を含む
-2. （ホスト）`npm run check:fix`（この環境では biome が走らない）
-3. （ホスト）`npm run oracle` — 差は 2 検体の `objectCount` だけのはず
-   （`input-incremental-save` 11 → 9 / `edit-bookmarks-annotation-metadata` 40 → 39）。
-   3.19.3 の表と照合してから `oracle:update` を**単独のコミット**で
-4. （ホスト）`git worktree prune` —— 3.19.3 で建てた worktree の記録が
-   `.git/worktrees/oldw` に残っている（この環境からは消せない）
-5. 次のツール。`ensure_tagged` は `xmp.ts` の `setXmpMetadata` を使うので、
-   `xmp-cos.ts` に `setXmpMetadata` の COS 版を足せば 2 本目の利用者が移る
+1. ~~（ホスト）`npm test`~~ ✅ 461 passed / 0 failed / 2 skipped
+2. ~~（ホスト）`npm run check:fix`~~ ✅ 14 ファイルを整形（`07afcf7`）
+3. ~~（ホスト）`npm run oracle` → 照合 → `oracle:update`~~ ✅ 差は予測どおり
+   2 検体の `objectCount` だけ。lock は単独コミット（`e9e0ef4`）
+4. ~~（ホスト）`git worktree prune`~~ ✅
+5. **次のツール。** `ensure_tagged` は `xmp.ts` の `setXmpMetadata` を使うので、
+   `xmp-cos.ts` に `setXmpMetadata` の COS 版を足せば `xmp.ts` の 2 本目の利用者が移る
 
 ---
 
