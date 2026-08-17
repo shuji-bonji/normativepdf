@@ -2943,6 +2943,89 @@ pdf-lib の `PDFHexString.of(hex)` が 16 バイトを書いており、`preserv
 
 ---
 
+## 3.24 `attach_file` を新経路へ（L4′.2 の 7 本目・2026-08-15）
+
+### 3.24.1 受け皿の欠落は 1 件（ライブラリの API は足していない）
+
+旧実装は pdf-lib の `doc.attach` に委ねていた。COS で書く必要があるのは次の一式で、
+**すべて 0.6.0 の公開表面で組める**:
+
+| 何を書くか | 条文 |
+|---|---|
+| ファイル指定辞書（`/Type /Filespec`・`/F`・`/UF`・`/EF`・`/Desc`・`/AFRelationship`） | Table 43 / 44（§7.11.3） |
+| 埋め込みファイルストリーム（`/Type /EmbeddedFile`・`/Subtype` = MIME 型の名前・`/Params /Size` と日時） | Table 45（§7.11.4.2） |
+| 名前ツリー `/Names /EmbeddedFiles /Names`（**鍵は辞書順**） | §7.9.6（shall） |
+| `/AF`（associated files） | §14.13 |
+
+`guessMimeType` は pdf-lib に触らないので `attachment.ts` のまま呼んでいる。
+
+### 3.24.2 🔴 並べ直しが「後始末」ではなくなった
+
+旧実装は、pdf-lib の**遅延埋め込み**のあと `flush()` して名前ツリーを実体化し、
+**書かれた後で `/Names` を並べ替えて**いた（SPEC-AUDIT Phase 1 の是正）。
+
+新実装は挿す位置を決めてから書くので、**辞書順が崩れる瞬間が無い**。
+「後で直す」が「そもそも崩さない」になった例である。
+
+### 3.24.3 意図して変えた 1 点
+
+⚠️ **添付の中身は非圧縮で書く。** 旧実装は `context.flateStream` を使っていた。
+normativepdf は書き側 Flate を拒む（ADR-0003 §4）。`/Filter` は任意（§7.3.8.2）で、
+埋め込みファイルの圧縮を求める条文は無い。ICC プロファイル（§3.22.2）と同じ判断である。
+
+### 3.24.4 旧実装との A/B と、オラクルに出た差
+
+`git worktree` で旧 dist を建てて突き合わせた:
+
+```
+create_text_pdf の出力に CSV を 1 本添付   旧 15 → 新 12
+  旧だけ: FontFile3 の重複 1 + ObjStm 1 + XRef ストリーム 1
+```
+
+`ensure_tagged`（§3.20.4）・`ensure_pdfa`（§3.22.3）と**同じ 3 つ**である。
+pdf-lib は保存のたびに font program を書き直し（元の非圧縮コピーが孤立する）、
+ObjStm と XRef ストリームを足す。
+
+オラクル（この環境）で動いたのは 3 検体で、すべて `attach_file` を含む:
+
+```
+conformance-attach-pdfa3b       objectCount 37 → 34
+conformance-attach-pdfa4-bare   objectCount 17 → 14
+conformance-attach-pdfa4f       objectCount 17 → 14
+```
+
+### 3.24.5 受入
+
+typecheck 0 / 素の node で **24 / 24**。内訳: Filespec の各項目・
+`/Subtype` が `/text#2fcsv`（名前の中の `/` が `#2f` に逃げること）・`/Params /Size`・
+`/Filter` が無いこと・`/AF`・**2 本目を足しても名前ツリーが辞書順**・
+同名の拒否・relationship 省略時の警告・`preserveSignatures` の前方バイト一致。
+
+🔴 **本番の受入は veraPDF である。** 添付を非圧縮にした影響は、ホストの
+`npm run oracle` の `verify`（PDF/A-3b 146/146・PDF/A-4 109/109）で見ること。
+
+### 3.24.6 現在地と次
+
+| | |
+|---|---|
+| 新経路を通るツール | **17 本中 7 本** |
+| `grep -rn "from 'pdf-lib'" src/` | **19** |
+
+次にすること:
+
+1. （ホスト）`TEST_FONT_PATH="$PWD/NotoSansJP-Regular.otf" npm test`
+2. （ホスト）`npm run check:fix`
+3. （ホスト）`npm run oracle` — 差は 3 検体 3 行のはず。**`verify` に差が出たら止める**
+4. （ホスト）`git worktree prune`（3.24.4 の記録が `.git/worktrees/oldw5` に残る）
+5. 次のツール: 残りは**フォントに触る組**（`add_watermark` / `stamp_page_numbers`）と
+   **フォームの組**（`fill_form` / `flatten_form` / `tag_form_fields`）と
+   **ページ操作の組**（`merge_pdfs` / `split_pdf` / `extract_pages` / `delete_pages` /
+   `reorder_pages`）。ページ操作の 5 本は `copyIntoNewDoc` 1 本を移せば同時に解ける
+   （§3.9.4 で「空の文書を作る」「グラフを複写する」「末尾に足す」の 3 つで組めることを
+   実証済み）ので、**次はページ操作の組が最も効率がよい**
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
