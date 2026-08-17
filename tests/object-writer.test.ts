@@ -116,8 +116,13 @@ describe('name objects (§7.3.5)', () => {
 
   it('writes white space and delimiters as #xx (R-7.3.5-7 / R-7.3.5-8)', () => {
     expect(write(name('Paired()Parentheses'))).toBe('/Paired#28#29Parentheses');
+    // 🔴 16 進の桁は**大文字**で書く。§7.3.5 は桁の大小を決めていないが、
+    // 小文字だけを読めない読み手がある（pdf-lib は `/#([\dABCDEF]{2})/g` で
+    // 照合するので、`/text#2fcsv` を "text#2fcsv" という名前として読む）
     expect(write(name('With Space'))).toBe('/With#20Space');
-    expect(write(name('Slash/Inside'))).toBe('/Slash#2fInside');
+    expect(write(name('Slash/Inside'))).toBe('/Slash#2FInside');
+    expect(write(name('Hash#Inside'))).toBe('/Hash#23Inside');
+    expect(write(name('text/csv'))).toBe('/text#2Fcsv');
   });
 
   it('encodes name characters as UTF-8 (R-7.3.5-13)', () => {

@@ -123,7 +123,13 @@ function writeName(out: ByteWriter, value: string): void {
   out.ascii('/');
   for (const byte of UTF8.encode(value)) {
     if (byte === 0x23 || isWhitespace(byte) || !isRegular(byte)) {
-      out.ascii(`#${byte.toString(16).padStart(2, '0')}`);
+      // 🔴 Upper case. §7.3.5 says "2-digit hexadecimal code" and does not fix
+      // the case, so both are legal to write — but readers exist that only
+      // decode upper case: pdf-lib matches `/#([\dABCDEF]{2})/g`, so a name
+      // written `/text#2fcsv` reads back as the string "text#2fcsv" there,
+      // and `/Subtype` on an embedded file stops being the MIME type.
+      // Measured 2026-08-15 against pdf-lib 1.17.1 (PDFName.js:10).
+      out.ascii(`#${byte.toString(16).toUpperCase().padStart(2, '0')}`);
     } else {
       out.bytes(new Uint8Array([byte]));
     }
