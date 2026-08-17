@@ -2488,8 +2488,18 @@ pdf-lib は保存のたびに**必ず** ObjStm と XRef ストリームを足す
 DocMDP P=3 が `SIGNED_PDF` で断ること・ASCII がリテラル / 日本語が UTF-16BE になること。
 
 ⚠️ **vitest と biome はこの環境で走らない**（macOS 向けの実行ファイルが要る）。
-新しいテストは `tests/cos-read.test.ts`（20 判定）と `tests/info-dict.test.ts`（5 判定）で、
+新しいテストは `tests/cos-read.test.ts`（31 判定）と `tests/info-dict.test.ts`（5 判定）で、
 ホストで走らせること。
+
+**ホスト実走（2026-08-15）**: 410 passed / 0 failed / 53 skipped（合計 463）。
+判定の総数は 427 → 463 で **+36** ——`cos-read` 31 + `info-dict` 5 と一致する。
+
+🔴 **ただし skip が 2 → 53 に増えている。** 増えた 51 本は
+`describe.skipIf(!process.env.TEST_FONT_PATH)` などフォント依存の組で、
+**この実走では `TEST_FONT_PATH` が設定されていなかった**（前回の実走は 425 passed / 2 skipped）。
+実装の後退ではないが、[[undecided-is-not-innocent]] のとおり
+**測れなかったものを緑に数えない** —— フォント依存の 51 本は
+`TEST_FONT_PATH=... npm test` で測り直すこと。
 
 ### 3.19.5 現在地
 
