@@ -3026,6 +3026,79 @@ typecheck 0 / 素の node で **24 / 24**。内訳: Filespec の各項目・
 
 ---
 
+## 3.25 🔴 ページ操作の 5 本を数えたら、`doc-level.ts` が付いてきた（2026-08-15）
+
+### 3.25.1 §3.9.4 の見積もりは小さすぎた
+
+§3.9.4 は「ページ操作 5 本は `copyIntoNewDoc` 1 本を通り、要るのは
+**空の文書を作る / グラフを複写する / 末尾に足す**の 3 つだけ（writer 側 40 行程度）」と
+書いた。**呼び出し側を読み直したら、それだけでは足りなかった。**
+
+| 5 本が使うもの | 行 | pdf-lib に触るか |
+|---|---|---|
+| `copyIntoNewDoc`（ページの複写） | 14 | 触る（`copyPages`） |
+| `copyDocumentInfo`（Info の 7 項目） | 18 | 触る（`setTitle` 等。`setInfoEntries` で済む） |
+| **`doc-level.ts`** | **470** | **全面的に触る**（`PDFObjectCopier`・`catalog.lookup`） |
+| `saveWithDocLevelWarnings` | 16 | 出口 |
+
+`doc-level.ts` は B-10a/b の実装である —— 入力にあった文書レベルの要素
+（添付・しおり・OCProperties・AcroForm・XMP…）を採取し、引き継げるものを運び、
+**引き継げなかったものを黙って落とさずに報告する**。5 本すべてがこれを直接呼ぶので、
+**ツール単位で移す限り一緒に移るしかない**。
+
+→ **この段は ~680 行**であって 40 行ではない。§3.9.4 の見積もりを訂正する。
+[[the-plan-is-not-the-measurement]]（§3.21.3 と同じ形で、また見積もりが外れた）。
+
+### 3.25.2 受け皿の欠落は 1 件（グラフの複写）
+
+数えた結果、**ライブラリに足すものは無い**。writer 側に要るのは 1 つだけで、
+それさえあれば `carryDocumentLevel` も COS で書ける（あれは複写器の薄い包みである）。
+
+| 必要な操作 | 受け皿 | 状態 |
+|---|---|---|
+| 空の文書を作る | `PdfDocumentEditor.create()` | ✅ |
+| **文書をまたぐオブジェクトグラフの複写** | 無い | 🔴 欠落 1 → **書いた**（下記） |
+| ページツリーの根に足す | `allocate` + `set` | ✅ |
+| Info の 7 項目 | `setInfoEntries` / `textOf` | ✅ |
+| 文書レベル要素の採取・喪失判定 | 無い（`doc-level.ts` は pdf-lib） | 🔴 書き直す（読むだけなので COS で書ける） |
+
+### 3.25.3 書いた受け皿（`src/services/cos-copy.ts`・193 行）
+
+| 関数 | 何をするか |
+|---|---|
+| `copyValue` / `copyIndirect` | 参照を複写先の番号に置き換えながらグラフを辿る |
+| `copyPagesInto` | 指定した順にページを複写し、ページツリーの根に足す |
+| `copyCatalogValue` | catalog の 1 項目（ストリームは間接に格上げ・R-7.3.8.1-5） |
+
+🔴 **循環を先に断つ。** ページは `/Parent` で親を、親は `/Kids` で子を指すので、
+素直に辿ると戻ってくる。**番号だけ先に採って対応表に載せ、中身は後から入れる**
+（`outline.ts` の相互参照と同じ手順）。同じ参照を 2 度複写しないのも同じ表で効く。
+
+🔴 **継承属性をページ自身に書き写す（R-7.7.3.4）。** `/Parent` を複写先の根へ
+付け替える以上、元の祖先からの継承の鎖は切れる。`/Resources` `/MediaBox`
+`/CropBox` `/Rotate` を `pageAttribute` で解決してから書かないと**既定値に落ちる**。
+pdf-lib の `copyPages` が内部でやっていたことを、条文の側から書き直した形である。
+
+根の番号は `PdfDocumentEditor.rootPagesRef` から採る（数字を書くと、
+ライブラリが変えたときに黙って壊れる）。
+
+**受入（素の node で 11/11）**: 指定順 `[3,1]` で並ぶこと・出力が 2 ページ・
+`checkPageTree` の違反 0・pdf-lib でも読めること・1 枚目が元の 3 枚目
+（`MediaBox` 200×100）・`/Resources` がページ自身にあること・`/Parent` が複写先の根・
+循環しても返ること・同じ参照は 1 回だけ複写すること。
+
+### 3.25.4 次にすること
+
+1. `doc-level-cos.ts` —— 採取（`surveyDocLevel`）・引き継ぎ（`carryDocumentLevel`）・
+   喪失警告（`docLevelLossWarnings`）の COS 版。`cos-copy.ts` の上に載る
+2. `page-ops-cos.ts` —— 5 本の本体（`copyIntoNewDoc` + `copyDocumentInfo`）
+3. `handlers.ts` の 5 本を差し替え、`edit-page-ops` / `edit-merge` の検体で照合
+
+⚠️ **5 本は 1 度に差し替える。** 同じ受け皿を共有しているので、
+1 本だけ新経路にすると `doc-level` が 2 つの器で二重に存在することになる。
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
