@@ -3499,6 +3499,104 @@ BDC / Artifact の marking を何も測らずに空文字で比較していた�
 
 ---
 
+## 3.30 受け皿 #1 と `tag_form_fields`（L4′.2 の 15 本目・2026-08-18）
+
+### 3.30.1 書いたもの
+
+| ファイル | 行 | 何をするか |
+|---|---:|---|
+| `src/services/acroform-read.ts` | 460 | フィールド木の読み取り（受け皿 #1）。3 本が共有する |
+| `src/services/acroform-tag.ts` | 103 | `/TU` の付与と Widget の列挙・ページの逆引き |
+| `src/services/edit-tag-form.ts` | 98 | ツール本体 |
+
+**受け皿は #1 だけで足りた。** §3.29.2 で「#7 は既にある」と数えたとおり、
+`struct-annot.ts` の `appendObjRefToStructTree(editor, page, ref, 'Form')` が
+そのまま使えた —— `add_annotation` が `'Annot'` で呼んでいるのと**同じ関数**である。
+
+### 3.30.2 条文を根拠にした点（受け皿 #1）
+
+| 何 | 根拠 |
+|---|---|
+| 終端かどうかは **`/T` の有無**で決める（`/Kids` の有無ではない） | R-12.7.4.2-4 |
+| `/FT` `/Ff` `/V` は祖先まで辿って引く（深さの上限なし） | R-12.7.4.1-3 / -4 / -5 |
+| 完全修飾名は祖先の部分名を PERIOD で繋ぐ | R-12.7.4.2-2 |
+| `/Kids` が無ければフィールド辞書自身が Widget | R-12.7.4.1-11 |
+| 種別は `/FT` + `/Ff` のビット（1 始まりで数える） | §12.7.5・R-12.7.4.1-6・Table 229 / 231 / 233 |
+| ラジオの選択肢は `/Opt` があればそれ、無ければ各 Widget の「入」状態 | R-12.7.5.2.4-5 / R-12.7.5.2.3-14 |
+| 選択の `/Opt` は文字列と `[書き出し値, 表示名]` の 2 形 | Table 234 |
+
+⚠️ **自分が書いた記述を 1 つ取り消した。** 冒頭に「旧実装は『`/Kids` があれば Widget』と
+見ていた」と書いたが、pdf-lib のソース（`core/acroform/utils.js` の
+`isNonTerminalAcroField`）を読むと**同じ規則**だった。測らずに書いた記述だったので消した。
+
+ただし pdf-lib はそれを経験則として書いている:
+
+> The spec is not entirely clear about how to determine whether a given dictionary
+> represents an acrofield or a widget annotation. So we will assume … `/T` …
+> This isn't a bullet proof solution
+
+ISO 32000-2 の R-12.7.4.2-4 は「`/T` を持たない辞書はフィールドとはみなされず、
+単に Widget 注釈である」と**条文として**言っている。振る舞いは同じなので差は出ないが、
+根拠が推測か条文かは別である。
+
+### 3.30.3 旧実装から消えたもの
+
+`tag_form_fields` は **pdf-lib 版増分更新の最後の利用者**だった。
+`src/ tests/ scripts/` を grep して確かめてから消した:
+
+- `editor.ts` の `saveWithPreservedSignatures` / `touchModificationDate` /
+  `assertDocMdpAllows`（同名の COS 版が `doc-mdp.ts` にある）
+- dirty 参照の手作業の申告（`TagWidgetsOutcome.dirtiedRefs`）
+- `reserveExistingObjectNumbers`
+
+`incremental.ts`（587 行）を輸入しているのは `tests/incremental.test.ts` の
+`readPreviousSection` **1 か所だけ**になった。消すのは L4′.3 で `output.ts` と一緒に。
+
+併せて `editor.ts` の宙に浮いた説明を 2 つ消した。1 つは今回消した `tagFormFields` の
+もの（中身は `edit-tag-form.ts` が引き取った）、もう 1 つは **`ensure_tagged` を
+説明しながら `flattenForm` に付いていた**もので、この変更より前から付き先が違っていた
+（HEAD で確認した）。
+
+### 3.30.4 `npm test` を先回りして直した 1 件 —— また「形を測っていた」
+
+`tests/form-tagging.test.ts` の `/TU` の読み出しはこう書いてあった:
+
+```ts
+return tu instanceof PDFHexString ? tu.decodeText() : undefined;
+```
+
+`textString()`（`cos.ts`）は ASCII をリテラル文字列で書くので、`agree` や `color` の
+`/TU` は `PDFHexString` にならず `undefined` が返る。旧実装が
+`PDFHexString.fromText` で**常に UTF-16BE 16 進**にしていたから通っていた。
+
+符号化（§7.9.2.2: PDFDocEncoding か UTF-16BE か）と字句の形（§7.3.4: リテラルか
+16 進か）は別の決めごとで、**形は内容に意味を持たない**。両方読む形に直した。
+§3.28.6 と同じ「内容ではなく形を測っていた」の類である。
+
+### 3.30.5 受入
+
+typecheck 0 / 素の node で **21/21**。内訳: `Form` 構造要素が Widget の数だけできること・
+`/K` が OBJR で `/Obj` が Widget を指し `/Pg` を持つこと・全 Widget の `/StructParent` が
+**重複しない**こと・`/Tabs /S`（7.18.3-1）・`/TU` の 3 通り（labels 指定 / 未指定で
+フィールド名を代用 / 二度目は既存を残す）・**冪等**（二度目は 5 件すべて飛ばし
+`Form` 要素が増えない）・断る 3 条件（タグ無し・フォーム無し・labels の誤記）・
+qpdf `--check`。
+
+受け皿 #1 は別に 20/20 で測った。うち 1 件は**ゴールデン（pdf-lib 版 `fill_form` の
+応答）の `fields` 配列と完全一致すること**である。
+
+オラクルは 27 検体で**構造差 0 行**。`form-tag-then-flatten` は
+`ensure_tagged` → `tag_form_fields` → `flatten_form` の 3 段で、最後の `flatten_form` が
+まだ pdf-lib なので、中間の出力は直接ダイジェストされていない ——
+**この検体で `objectCount` の差が出るのは `flatten_form` を移したときである。**
+
+### 3.30.6 次にすること
+
+`fill_form`（受け皿 #2 #3 #4）。#3（可変テキストの外観生成）を単体で作り、
+quadding・複数行・comb・自動サイズを 1 つずつ測ってから繋ぐ。
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
