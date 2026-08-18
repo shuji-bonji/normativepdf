@@ -4091,13 +4091,49 @@ Validated by veraPDF (/opt/homebrew/bin/verapdf, version 1.30.0) — authoritati
 
 版の行が無い出力を返すスタブでは `"version": null` と `version unknown` になった。
 
-#### まだ載っていないもの
+##### 🔴 最初の実測は引数を間違えていて、スタブがそれを隠した
 
-`uc-oracle.lock.json` は `tooling: { "qpdf": "12.4.0" }` のままである
-（採取が版の記録より前）。`npm run oracle:update` を一度通すまで、
-`docs/CONFORMANCE.md` は「版が記録されていない採取」と書く。
-**先に版を手で書き足してレポートだけ整えることはしない** —— それは
-採取していない数字を載せることになる。
+`validateConformance` の引数は `(parsed: ParsedPdf, filePath: string, options)` である。
+最初の probe はファイルパスを第 1 引数に渡していた（`(filePath, options)` だと思っていた）。
+**スタブは引数を見ずに JSON を返すので、間違いのまま `performed: true` が出た。**
+
+同じ間違いをホストの本物の veraPDF で実行したら、その場で露見した:
+
+```
+veraPDF execution failed: Command failed:
+  /opt/homebrew/bin/verapdf --format json --flavour 2b [object Object]
+重大: File .../[object Object] doesn't exist.
+```
+
+`parsePdf` を先に通す正しい呼び方で測り直した。**結果は上の 2 つと同じ**
+（`version` は `resolveAuthoritativeValidation` が返すもので、`parsed` を読む前に
+決まるため）。ただし**最初の測定は、主張したところまでは測っていなかった**。
+
+教訓は [[stub-hides-the-interface]] —— スタブは呼ばれ方を検査しない。
+配線を測るスタブは、**引数を見ない**という性質そのものが、
+引数の間違いを通す穴になる。
+
+#### lock への記録（2026-08-18 ホスト実測）
+
+`npm run oracle:update`（qpdf 12.4.0 + veraPDF 1.30.0）:
+
+```
+測定 29 / 測れず 0 / 失敗 0
+```
+
+lock の差分は **2 行だけ**だった —— `capturedAt` と、新しく入った版:
+
+```json
+"tooling": { "qpdf": "12.4.0", "verapdf": "1.30.0" }
+```
+
+29 検体の構造ダイジェストは前回の採取と全一致である。
+`docs/CONFORMANCE.md` の「適合の判定」行が
+「veraPDF（版が記録されていない採取）」から「veraPDF 1.30.0」に変わった。
+
+🔴 **版を手で書き足してレポートだけ整えることはしなかった。** それは
+採取していない数字を載せることになる。採り直すまでレポートは
+「版が記録されていない採取」と書いたままにしてある。
 
 
 ---
