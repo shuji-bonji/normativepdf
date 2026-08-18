@@ -3813,11 +3813,14 @@ dependencies に明示した。
 
 ### 3.32.5 残っているもの
 
-- `writer-doc.ts` の `drawText` の引数は「旧実装（pdf-lib の `PDFPage.drawText`）と
-  同じ形」というコメントを持つ。**形を揃える理由はもう無い**ので、
-  L4′.4 以降で見直す
-- Phase 3 §4 の受入 2（UC 回帰の基準値）と 3（veraPDF レポート同梱）は
-  ホストでの veraPDF 実測が要る
+- ~~`writer-doc.ts` の `drawText` の引数は「旧実装（pdf-lib の `PDFPage.drawText`）と
+  同じ形」というコメントを持つ。**形を揃える理由はもう無い**ので、L4′.4 以降で見直す~~
+  **解消（2026-08-18）**。`9f81d6c`（`TL` / `T*` の除去）が同じコミットで
+  `lineHeight?: number` と「同じ形にしてある」の 1 行を落としている。
+  いま `DrawTextArgs` に付いているのは**引数を落とした理由**の説明で、
+  形を揃える主張ではない（`git show 2b582e2:src/services/writer-doc.ts` と現在の差で確認）
+- ~~Phase 3 §4 の受入 2（UC 回帰の基準値）と 3（veraPDF レポート同梱）は
+  ホストでの veraPDF 実測が要る~~ **解消（§3.33）**
 
 ### 3.32.6 受入
 

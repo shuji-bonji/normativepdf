@@ -3,18 +3,18 @@
 > **進捗の正典はこのファイル。** チェックボックスの更新のみで進捗を表す（詳細は各正典文書へ）。
 > 設計の中身は [`DESIGN.md`](DESIGN.md)、公開面は [`PUBLISHING.md`](PUBLISHING.md)、規律は [`GUARDS.md`](GUARDS.md)。
 >
-> 現在地: **Phase 3（段階 2・pdf-lib 撤去）に着手 — まず受入の計器を立てた**（2026-08-13・ADR-0006 + `pdf-writer-mcp/scripts/uc-oracle/`。旧実装のゴールデンは撤去したら二度と採れないので先に採取した）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+> 現在地: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
 >
 > **次に着手するものは [`handoff/`](handoff/) に 1 件 1 枚で置いてある**（別セッションが 1 枚読めば始められる形）:
-> [Phase 3 = pdf-lib 撤去](handoff/phase3-pdflib-removal.md) ／
 > [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
-> [自前 inflate（着手条件は未成立）](handoff/own-inflate.md)
+> [自前 inflate（着手条件は未成立）](handoff/own-inflate.md)。
+> [Phase 3 = pdf-lib 撤去](handoff/phase3-pdflib-removal.md) は**完了した作業の記録**として残す
 
 ```mermaid
 flowchart LR
-    P0["P0 準備<br/>✅ 2026-08-08"] --> P1["P1 調査・段階0<br/>COS+パーサ 🚧"]
-    P1 --> P2["P2 段階1<br/>シリアライザ 🚧"]
-    P2 --> P3["P3 段階2<br/>生成パス = pdf-lib 撤去"]
+    P0["P0 準備<br/>✅ 2026-08-08"] --> P1["P1 調査・段階0<br/>COS+パーサ ✅"]
+    P1 --> P2["P2 段階1<br/>シリアライザ ✅"]
+    P2 --> P3["P3 段階2<br/>生成パス = pdf-lib 撤去 ✅"]
     P3 --> P4["P4 段階3<br/>PDF 2.0 実体"]
     P4 --> P5["P5 段階4<br/>UA-2 / WTPDF"]
     P3 -.-> T1["試験: Editor PWA"]
@@ -23,7 +23,9 @@ flowchart LR
     P3 -.-> R2["公開: サイト normativepdf.dev"]
     style P0 fill:#d4edda
     style P1 fill:#d4edda
-    style P2 fill:#fff3cd
+    style P2 fill:#d4edda
+    style P3 fill:#d4edda
+    style P4 fill:#fff3cd
 ```
 
 ---
@@ -65,7 +67,7 @@ flowchart LR
   - **歩けるようになった 4 件のうち 1 件**: `PDF 2.0 with offset start.pdf`（§7.5.2 の origin > 0）— 旧実装は null、新実装は歩けた。オフセット原点を条文どおり扱った効果
   - **打ち切りとして報告するようになった 3 件のうち 1 件**: `dss-pades-5sigs-doctimestamp.pdf` — trailer が `/Prev 0` を持つ 8 リビジョンの 5 署名検体。旧実装は `0` を「Prev なし」として飲み込み `truncated: false`（＝完全に歩けた）と報告していた。**署名 5 本の文書について「古いリビジョンは無い」と断言していた**ことになる。新実装は追えない `/Prev` を truncated として報告 → DocMDP は `indeterminate` になる（[[revision-diff-lies-linearized-and-full-save]] の 3 例目）
   - **後退 6 件（全て veraPDF-corpus の fail 検体 = 意図的破損の xref）**: §7.5.4 の厳格さで normativepdf が拒否 → 「歩けた」から「判定不能」へ落ちる。理由の内訳 = `xref` が行独立でない (3)・subsection ヘッダのエントリ数が数値でない (1)・エントリが 19 バイト（`f\n`）(1)・xref でも xref ストリームでもない (1)。**落ちる向きは常に indeterminate 側で、誤った pass は生まない**が、19 バイトエントリは実世界の緩いプロデューサにも出る形なので、実の壊れ検体で要求が立ったら回復方針として verify 側に足す（library は strict のまま）
-- [ ] reader から使わせる（第 2 消費者）— **版数報告だけの部分移行は取り下げた（2026-08-13）**。reader の版数経路は pdf-lib 依存であり、1 フィールドのために normativepdf でもう一度フルパースして strict throw を pdf-lib で受けるフォールバック二重構造になる。版数は面が小さく API 適合性の計器としても割に合わない（[[saturated-faces-cannot-carry-a-difference]]）。**Phase 3 の pdf-lib 撤去と一括で移行する**
+- [ ] reader から使わせる（第 2 消費者）— **版数報告だけの部分移行は取り下げた（2026-08-13）**。reader の版数経路は pdf-lib 依存であり、1 フィールドのために normativepdf でもう一度フルパースして strict throw を pdf-lib で受けるフォールバック二重構造になる。版数は面が小さく API 適合性の計器としても割に合わない（[[saturated-faces-cannot-carry-a-difference]]）。**Phase 3 で移行したのは writer であって reader ではない**（訂正 2026-08-18）。reader はまだ pdf-lib の上にある。移行の要求は第 1 消費者 = writer から立ったので、reader は次の消費者として別に起こす —— 「一括で移行する」と書いていたが、そうはならなかった
 - [x] SKILL.md の TODO を実測で埋める（2026-08-11: コマンド表 = sandbox/ホストの区別・コーパス門番 2 種の合格基準・頻出条項索引 9 件。pdf-lib オラクル / 独立実装読み戻しは段階 1〜2 の TODO として残置）
 
 ## Phase 2: 段階 1 — シリアライザ・増分更新 ✅（受入充足・2026-08-13）
@@ -104,7 +106,7 @@ flowchart LR
 
 🔴 **実装中にコーパスが writer のバグを 1 件捕まえた**: 実数を `toFixed(20)` で書いていたため `/YStep -1.175e-38` が `0` になっていた（TWG A018）。元ファイルは 38 桁の位置記法で、Annex C が定める最小の非ゼロ実数の境界を狙った検体。ユニットテストには無く、コーパスにしか無かった。
 
-## Phase 3: 段階 2 — 生成パス移行（pdf-lib 撤去）
+## Phase 3: 段階 2 — 生成パス移行（pdf-lib 撤去） ✅（受入充足・2026-08-18）
 
 **受入: pdf-lib 完全撤去・PDF/A-3b COMPLIANT 維持・リリースごと veraPDF レポート開始**
 
@@ -206,8 +208,16 @@ flowchart LR
   - **実測 24/24**（ビルド済み JS 実走）・`tests/declare.test.ts` は 18 ケース（ホスト実走待ち）。
         **T-3 = 検査を全部通す（＝宣言だけ書く実装に戻す）と 10 件・`unchecked` を空にすると 1 件・
         `PRE-NOATTACHMENTS` を外すと 1 件落ちる**
-- [ ] **受入: pdf-lib 撤去 + UC 回帰全緑 + PDF/A-3b COMPLIANT**
-- [ ] PDF family へ取り込み（writer が第一利用者・自身でコントリビュート）
+- [x] **受入: pdf-lib 撤去 + UC 回帰全緑 + PDF/A-3b COMPLIANT（2026-08-18・handoff §3.33）**
+  - `grep -rl "from 'pdf-lib'" src/` **17 → 0**・`package.json` の dependencies から消えた
+    （devDependencies に残るのは**テスト側の独立した読み手**として = ADR-0004 / GUARDS T-2）
+  - UC オラクル **測定 29 / 測れず 0 / 失敗 0**（qpdf 12.4.0 + veraPDF 1.30.0 + 署名検証）
+  - veraPDF 実測: PDF/A-3b **146/146** / PDF/UA-1 **106/106** / PDF/A-4 **109/109** COMPLIANT。
+    基準値を下回っていない
+  - **測っていない軸は 0 件**（2026-08-18 時点。オラクルが「1 形しか無い軸」を毎回報告する）
+- [x] PDF family へ取り込み（writer が第一利用者・自身でコントリビュート）— **writer 0.20.1 公開（2026-08-18）**。
+      移行の過程で normativepdf 側に足したもの = `PdfDocumentEditor.create()` / コンテンツストリームビルダ /
+      フォント辞書 / 構造木 / 宣言。**要求はすべて第 1 消費者から立った**
 
 ## Phase 4: 段階 3 — PDF 2.0 の実体
 
@@ -231,7 +241,10 @@ flowchart LR
 - [x] README 英語主・日本語従へ転換（2026-08-11。現在地 = コーパス門番の数字も記載・非公開パス参照を削除）
 - [ ] normativepdf.dev DNS 設定（HTTPS 必須 = GitHub Pages）
 - [x] 初回 npm 公開（2026-08-11・0.1.0。**公開版検証 PASS** = 31 エクスポート一致・実パース OK・/Version 格上げ動作・`npm view` で 0.1.0 確認）
-- [ ] **リリースごとの veraPDF レポート同梱を開始**（Phase 3 以降・看板の裏付け）
+- [x] **リリースごとの veraPDF レポート同梱を開始（2026-08-18）** — `pdf-writer-mcp/docs/CONFORMANCE.md`。
+      **lock から生成する**（手書きしない）ので、実装が動いてレポートだけ古い状態にならない。
+      `prepublishOnly` が lock との差を検査して publish を止める。判定を出したビルド
+      （qpdf 12.4.0 / veraPDF 1.30.0）も一緒に載る —— 規則の数は同じビルドの実行どうしでしか比べられない
 - [ ] サイト構築（マニュアル・チュートリアル・リファレンス・family との関係。雛形 = pdf-family-site。**着手は API 確定後**。「family との関係」の節のみ先行可）
 
 ## 試験トラック
@@ -242,7 +255,10 @@ flowchart LR
   - **全体合格率が記録した baseline と一致する**。下回れば後退。**上回っても赤にする** — floor を改善に置き去りにすると、その後 baseline まで滑り戻っても黙って通る。改善と同じコミットで `corpus.lock.json` を上げさせるのが唯一のコスト
   - **T-3 実測（6 通り）**: 正常 = exit 0 / pin 不一致 = 1 / sha ファイル無し = 1 / **パーサを壊す**（xref エントリの EOL から合法形 SP LF を落とす）= 1（pass 検体 2 件 + 2756/2907 で 2 門番とも発火）/ baseline 置き去り = 1 / 戻して緑
 - [ ] 実装と pin の同時更新を禁じる仕組み（今は `corpus.lock.json` の `$comment` に「pin 更新と code 変更を同じコミットに入れない」と書いてあるだけで、機械で止めていない）
-- [ ] 独立実装読み戻し（qpdf --check / poppler / veraPDF）
+- [ ] 独立実装読み戻し（qpdf --check / poppler / veraPDF）— **qpdf と veraPDF は回っている**
+      （コーパス往復 3 モードで qpdf 全件 clean・writer の UC オラクルが 29 検体で両方を回す）。
+      **poppler は未**。3 つ目の読み手を足すかどうかは、qpdf / veraPDF の両方を通った出力で
+      実害が出たときに決める
 - [ ] 実地試験 1: PDF エディタ PWA（normativepdf を使って作成）
 - [ ] 実地試験 2: e-shiwake の請求書発行（デジタル署名・証明書/鍵/TSA は利用者設定）
 
