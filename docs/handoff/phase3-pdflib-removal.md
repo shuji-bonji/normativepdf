@@ -3194,6 +3194,86 @@ split の 2 ファイルとページ数・**PDF 2.0 の入力が 2.0 のまま**
 
 ---
 
+## 3.27 残り 5 本の受け皿を数えた —— フォント組が先、フォーム組は後（2026-08-15）
+
+### 3.27.1 フォーム組はフォント組に**依存している**
+
+`fill_form` / `flatten_form` / `tag_form_fields` は `form.ts`（546 行）を通る。
+そのうち移植の重心は**外観の再生成**である:
+
+```
+flatten_form → prepareFormAppearances(doc, fontPath) → refreshAppearances(form, font)
+```
+
+外観（§12.7.4.3 の `/DA` に従って値を描いた Form XObject）を作り直すには
+**フォントを埋め込んで文字を描く**必要がある。つまりフォーム組はフォント組の
+受け皿を前提にする。**順序はフォント組が先**である。
+
+加えて `form.ts` は pdf-lib の高水準 API（`PDFForm` / `PDFField` /
+`form.flatten()` / `field.setText()`）に密着していて、COS で書き直すと
+フィールド木の走査（§12.7.3）・型ごとの値の設定・外観の生成・平坦化が要る。
+**この 3 本は残り 5 本のうち明らかに重い側**であり、先に軽い側を終える。
+
+### 3.27.2 フォント組（`add_watermark` / `stamp_page_numbers`）の数え
+
+🔴 **見積もっていたより軽い。** §3.24.6 / §3.26.5 では
+「`font-conformance.ts`（563 行）の是正が要る」と書いたが、**要らない**。
+
+| 必要な操作 | 受け皿 | 状態 |
+|---|---|---|
+| フォントの埋め込み（サブセット・Type0・標準 14 書体） | **`font-embed.ts`（292 行・L3′ で書いた）** | ⚠️ `WriterDocument` 前提 → アダプタが要る（下記） |
+| 文字の測定（`TextMetrics`） | `watermark.ts` / `page-number.ts` は**既に抽象で受けている** | ✅ 触らなくてよい |
+| ページ内容に描画を足す | `ContentStreamBuilder` + `/Contents` 配列への追記（`tagged-cos.ts` の形） | ✅ |
+| Artifact で囲む（PDF/UA 7.1-3） | `markArtifactOnPage` の COS 版 | 🔴 欠落（小） |
+| ページ資源へ Font を登録 | `/Resources /Font` を書く | 🔴 欠落（小） |
+| **フォント辞書の是正（`normalizeEmbeddedFonts`・563 行）** | **要らない** | ✅ |
+
+**是正が要らない理由**（`font-conformance.ts:241` が自分でそう書いている）:
+`normalizeEmbeddedFonts` は「pdf-lib が書いた辞書を後から是正する」ものであり、
+`buildType0Font` は**バイト列から辞書の型を導く**ので是正すべき誤りを作れない。
+`output-edited.ts` の冒頭に「まだ無いもの」として書いてある警告は、
+**新しい出口が pdf-lib の辞書を受け取らない以上、消してよい**。
+
+⚠️ ただし `makeSubsetCharsetIdentity`（CFF の charset を identity にする・R-9.7.4.2-4）は
+辞書の話ではなく**プログラムのバイト列の話**なので別途要る。生成パスは既に呼んでいる。
+
+### 3.27.3 🔴 1 つだけ厄介なもの: 採番が同期と非同期でぶつかる
+
+`font-embed.ts` は `WriterDocument`（生成パスの器）を取る。その理由が
+`writer-doc.ts` の冒頭に書いてある:
+
+> `PdfDocumentEditor.allocate` は非同期である（初回に全参照を走査して、定義の無い
+> 番号を配らないようにする）。空から作った文書には走査すべき参照が無く、一方
+> `StructObjectSink.reserve()` と `FontObjectSink.allocate()` は**同期**を要求する。
+> だからここでは自前の採番器を持ち、**`editor.allocate()` は呼ばない** ——
+> 2 つの採番器が同じ文書に対して動くと、どちらも相手の配った番号を知らないまま重複を配る。
+
+**編集パスではこの前提が成り立たない。** 開いた文書には既存の参照があるので、
+自前の採番器を勝手に走らせると既存の番号とぶつかる。
+
+案（着手時に決める）:
+
+| 案 | 中身 | 懸念 |
+|---|---|---|
+| (a) **番号を先に確保する** | `editor.allocate(COS_NULL)` を N 個回して番号の池を作り、同期の採番器にはその池から配らせる | N を先に知る必要がある（フォント 1 本で使う数は数えられる） |
+| (b) `font-embed` を非同期にする | `FontObjectSink` を非同期に変える | normativepdf の表面（`buildType0Font`）に触る = 0.7.0 |
+
+**(a) を先に検討する。** ライブラリの表面を増やさずに済み、
+「2 つの採番器が同じ文書で動かない」という `writer-doc.ts` の決めごとも守れる。
+
+### 3.27.4 次にすること
+
+1. フォント 1 本の埋め込みが**いくつ番号を使うか**を数える（(a) の N）
+2. `font-embed` に「番号の池から配る」入口を足し、開いた文書へ埋め込めるようにする
+3. `markArtifactOnPage` の COS 版（BMC…EMC で囲む・`tagged-cos.ts` の追記と同じ形）
+4. `add_watermark` / `stamp_page_numbers` を移す（`watermark.ts` / `page-number.ts` の
+   描画部分だけ COS に置き換え、測定は触らない）
+5. `output-edited.ts` の「まだ無いもの: `normalizeEmbeddedFonts`」の段落を**消す**
+   （3.27.2 のとおり、新しい出口には要らない）
+6. そのあとフォーム組
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
