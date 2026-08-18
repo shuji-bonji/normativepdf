@@ -282,6 +282,12 @@ export class PdfDocumentEditor {
    *
    * The scan happens here rather than in `open`, so a session that only reads
    * or only replaces existing objects never pays for it.
+   *
+   * 🔴 **Numbers this session already wrote with `set` are covered too**, but
+   * not by this loop — `#scanReferences` adds every `#changed` object number
+   * to the set, and `set` keeps adding once the set exists. A document built
+   * from `create()` writes everything with `set`, so this is the path that
+   * keeps `allocate` from handing back a number it already holds.
    */
   async allocate(object: CosObject): Promise<CosRef> {
     if (this.#referenced === null) {

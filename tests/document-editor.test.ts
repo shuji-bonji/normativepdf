@@ -122,6 +122,26 @@ describe('allocate clears references, not just definitions', () => {
     expect(ref.objectNumber).toBe(5); // not 4
   });
 
+  it('skips a number this session already wrote with set', async () => {
+    // A document built from create() puts every object in place with `set`.
+    // Those numbers are in neither `xref` (the file has none) nor the
+    // reference scan (nothing points at 7 yet), so an `allocate` that only
+    // consults those two hands 7 back and the earlier object disappears.
+    const editor = PdfDocumentEditor.create({ version: '2.0' });
+    editor.set(7, name('Written'));
+    const ref = await editor.allocate(name('New'));
+    expect(ref.objectNumber).not.toBe(7);
+    expect(await editor.get(7)).toEqual(name('Written'));
+  });
+
+  it('skips written numbers on an opened file too', async () => {
+    const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
+    editor.set(4, name('Written')); // the number allocate would otherwise take
+    const ref = await editor.allocate(name('New'));
+    expect(ref.objectNumber).toBe(5);
+    expect(await editor.get(4)).toEqual(name('Written'));
+  });
+
   it('gives out a different number each time', async () => {
     const editor = await PdfDocumentEditor.open(fixture('flat-1page'));
     const a = await editor.allocate(name('A'));
