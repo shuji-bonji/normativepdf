@@ -3962,6 +3962,146 @@ publish が止まる。
 
 ---
 
+## 3.35 §4 受入の後に残していた 2 件（2026-08-18）
+
+§4 の 3 条件は §3.33 で満たした。そのとき「後で片づける」として残したのが
+**#2 生成パスの採番** と **#3 veraPDF の版の記録** である。
+
+### 3.35.1 #2 —— 採番器が 2 つある
+
+`writer-doc.ts` の冒頭は以前からこう書いていた ——「**`editor.allocate()` は呼ばない**。
+2 つの採番器が同じ文書に対して動くと、どちらも相手の配った番号を知らないまま重複を配る」。
+**約束はコードでは守られていなかった。**
+
+実測（素の node、2026-08-18）:
+
+```
+reserve() が配った番号 : 3
+editor.allocate() の番号: 3   ← 重複
+```
+
+`reserve()` は番号を採るだけで**まだ何も書かない**。`editor.allocate` は
+「自分が `set` で書いた番号」を避けるが、書かれていない予約は見えない。
+後から `write()` すると、`allocate` が入れたものが消える。
+
+**直し方**: `reserve()` が空の値（`COS_NULL`）を置いて番号を押さえる
+（§7.3.10 が「解放項目への参照は null オブジェクト」と言うとおり、null は
+「まだ何も無い」を表せる値である）。commit `e2865f1`。
+
+```
+reserve() → 3 / editor.allocate() → 4   ← 重複しない
+```
+
+#### 閉じたのは片方向だけである
+
+同じ日に逆向きも測った:
+
+```
+reserve() → 3 / editor.allocate() → 4 / reserve() → 4   ← 重複
+```
+
+`reserve()` の `#next` は editor が配った番号を見ていない。
+つまり「生成パスでは `editor.allocate()` を呼ばない」は**依然として約束**であり、
+コードが強制するものではない。
+
+🔴 **それでも逆向きを閉じなかった。** 通らない経路のために採番を O(n) にするからである。
+通らないことを測ってある:
+
+| 測ったもの | 数 |
+|---|---|
+| `src/` で `.editor` を受ける `opened.editor`（編集パス） | 67 |
+| `WriterDocument` 内部の `this.editor` | 8 |
+| **`doc.editor`（生成パスの editor を外へ渡す形）** | **0** |
+| `editor.allocate` の呼び出し | 27（すべて `opened.editor` から辿れる） |
+
+生成パスは `doc.allocate` / `doc.reserve` しか使わない。この事実を
+ファイル冒頭に書いた（測っていない断定を残さないため）。
+
+#### normativepdf 側の欠陥は無かった
+
+このとき `PdfDocumentEditor.allocate` が「自分が `set` した番号」を避けないのではないか
+と疑い、直しを書いた。**素の node で 0.6.1（公開版）と直し済みを並べたら、
+挙動が同じだった** —— `#scanReferences` が `#changed` の各要素について
+`found.add(object.objectNumber)` をしているので、もともと避けている。
+
+**直しは戻した。** 残したのは (a) `allocate` の doc コメント（なぜ避けられるのかの説明）と
+(b) それを固定する回帰テスト 2 本。commit `adb3b2f`。
+
+### 3.35.2 #3 —— どの veraPDF が判定したのか
+
+適合レポートは「PDF/A-3b 146/146」のような数を載せる。
+**規則の数は、同じビルドの実行どうしでしか比べられない。** 版が記録されていなければ、
+数が変わったとき「文書が変わった」のか「veraPDF が変わった」のかを分けられない。
+
+#### 実行ファイルのパスは版の代わりにならない
+
+実測（このマシン、2026-08-18）:
+
+| 見る場所 | 答え |
+|---|---|
+| Homebrew の Cellar のディレクトリ名 | `1.30.2` |
+| `verapdf --version` | **`1.30.0`** |
+
+だから版は**veraPDF 自身に聞く**。
+
+#### `--version` の出力は 1 行目ではない
+
+実測（veraPDF 1.30.0 / Homebrew）:
+
+```
+WARNING: Final field flavour in class org.verapdf... has been mutated reflectively
+WARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning
+WARNING: Mutating final fields will be blocked in a future release...
+veraPDF 1.30.0
+Built: Wed Jun 03 13:47:00 JST 2026
+```
+
+JVM の警告が先に来る。警告は stdout / stderr のどちらに出るかが JVM 依存なので
+**両方を読む**。`parseVeraPdfVersion` は `/^\s*veraPDF\s+(\S+)\s*$/` に一致する行を探し、
+無ければ `null` を返す（**推測しない**）。ユニットテスト 6 本は
+**実測した出力そのもの**を検体にしている。
+
+#### 3 つの層に載せた
+
+| 層 | 何が載るか | commit |
+|---|---|---|
+| `pdf-verify-mcp` | `authoritativeValidation.version`（`string \| null`）と、判定の出所の文 | `5f18de0` |
+| writer のオラクル | `lock.tooling.verapdf`。採取時と違えば警告する | `1972ebb` |
+| `docs/CONFORMANCE.md` | 「適合の判定」の行に `veraPDF 1.30.0` | `1972ebb` |
+
+判定の出所の文はこうなる:
+
+```
+Validated by veraPDF (/opt/homebrew/bin/verapdf, version 1.30.0) — authoritative result.
+```
+
+版が読めなかったときは `version unknown` と書く。**「読めなかった」を「無い」に
+畳まない** —— 判定は行われているからである。
+
+#### 配線の実測（2026-08-18）
+
+`version` が `authoritativeValidation` まで届くことを、`--version` に上の実測出力を
+返すだけのスタブ実行ファイルで確かめた。**測ったのは配線であって veraPDF ではない**:
+
+```json
+{ "performed": true, "validator": "verapdf",
+  "path": "/tmp/vstub/verapdf", "version": "1.30.0" }
+"Validated by veraPDF (/tmp/vstub/verapdf, version 1.30.0) — authoritative result."
+```
+
+版の行が無い出力を返すスタブでは `"version": null` と `version unknown` になった。
+
+#### まだ載っていないもの
+
+`uc-oracle.lock.json` は `tooling: { "qpdf": "12.4.0" }` のままである
+（採取が版の記録より前）。`npm run oracle:update` を一度通すまで、
+`docs/CONFORMANCE.md` は「版が記録されていない採取」と書く。
+**先に版を手で書き足してレポートだけ整えることはしない** —— それは
+採取していない数字を載せることになる。
+
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
