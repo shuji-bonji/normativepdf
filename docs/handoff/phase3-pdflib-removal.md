@@ -3378,7 +3378,40 @@ qpdf `--check` が 5 検体とも通ること・`preserveSignatures` の前方�
 
 オラクルは 27 検体を測って差 2 検体（上の 25 行）。他 25 検体は一致。
 
-### 3.28.6 次にすること
+### 3.28.6 🔴 `npm test` が見つけた 1 件 ——「測っていない検査」の 3 度目
+
+ホストの `npm test` が 1 件落ちた。**実装ではなくテストの側**である。
+
+`tests/page-number.test.ts` の `pageContent` は、内容ストリームを
+`inflateSync` に通し、**失敗したら黙って捨てて**いた。新しい出口は書き出し時に
+Flate を掛けない（ADR-0003 §4）ので、戻り値が空文字になる。
+
+```
+AssertionError: expected '' to contain '/Artifact BMC'
+```
+
+落ちたのは 1 件だが、**同じファイルの隣の検査は空文字を相手に通っていた**:
+
+```ts
+expect(content).not.toContain('/Artifact BMC');  // content === '' なので常に通る
+```
+
+つまり「タグ無しでは囲まない」は今回の変更の前から何も測っていなかった。
+
+辞書の `/Filter` を見て圧縮の有無を判断する形に直した。非圧縮のときは
+NUL を含むものを除く（フォントプログラムを内容ストリームと取り違えないため）。
+素の node で 6/6 —— **どちらの検査も中身が空でないことを併せて測る**ようにした。
+
+**これで 3 度目である。** `tagged.test.ts` は同じ誤りを直したときの注記を
+コード内に残している（「以前は inflate 失敗を黙って捨てていたため、
+BDC / Artifact の marking を何も測らずに空文字で比較していた」）。
+残る 5 ファイル（`attachment` / `doc-level` / `extract` / `render` / `watermark`）は
+すでに生バイトへ落ちる形になっていることを確認した。
+
+⚠️ **`try { inflate } catch { 捨てる }` は書かないこと。** 捨てた先で
+`toContain` は落ちるが `not.toContain` は通るので、**検査が半分だけ生き残る**。
+
+### 3.28.7 次にすること
 
 1. `output-edited.ts` の「まだ無いもの: `normalizeEmbeddedFonts`」の段落を**消す**
    （3.27.2 のとおり、新しい出口には要らない）
