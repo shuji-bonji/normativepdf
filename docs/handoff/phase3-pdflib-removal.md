@@ -3745,6 +3745,88 @@ font-conformance.ts  pdf-version.ts
 
 ---
 
+## 3.32 L4′.3 —— `src/` から pdf-lib が消えた（2026-08-18）
+
+### 3.32.1 到達点
+
+**Phase 3 §4 の受入 1「pdf-lib の完全撤去」を満たした。**
+
+```
+grep -rl "from 'pdf-lib'" src/   →  0 件（17 → 0）
+package.json dependencies        →  pdf-lib 無し（devDependencies へ）
+```
+
+pdf-lib は **テスト側の独立した読み手としてだけ**残る
+（ADR-0004「二面で測る」・`tests/helpers/pdf-lib-reader.ts`）。
+
+### 3.32.2 消し方の型 —— 3 通りしか無かった
+
+17 ファイルを 4 段で畳んだ。**どのファイルもこの 3 通りのどれか**だった。
+
+| 型 | 何をしたか | 例 |
+|---|---|---|
+| **(a) 丸ごと用済み** | 新経路のファイルに置き換わっている。grep して消す | `editor.ts` / `output.ts` / `ensure-tagged.ts` / `font-manager-pdflib.ts` / `color-pdflib.ts` |
+| **(b) 純粋な部分だけ生きている** | pdf-lib に依らない部分を新しいファイルへ出し、残りを消す | `incremental.ts` → `xref-locate.ts` / `attachment.ts` → `mime.ts` / `font-conformance.ts` → `sfnt-cff.ts` / `xmp.ts` → `xmp-build.ts` |
+| **(c) 読み手としてだけ生きている** | テストへ移す | `struct-append.ts` の `isTagged` / `attachment.ts` の `listEmbeddedFiles` / `form.ts` の `listFields` / `pdfa-conformance.ts` の `hasPdfaDeclaration` |
+
+🔴 **(c) を src に残さないこと。** 残すと「writer が自分の書いたものを自分で読み戻す」
+形になり、共有の誤りが見えなくなる（GUARDS.md の T-2）。
+`tests/helpers/pdf-lib-reader.ts` の冒頭にこれを書いた。
+
+⚠️ **1 度やりかけて戻した。** `tests/form.test.ts` の `fieldsOf` を
+新しい `acroform-read.ts` の `listFields` に繋ぎかけた。それだと (c) を
+src に戻すことになる。型検査も同じことを言った（`PDFDocument` は
+`PdfDocumentEditor` に渡せない）。pdf-lib の `PDFForm` を使う版をテスト側に置いた。
+
+### 3.32.3 旧実装を測っていたテスト 7 件の扱い
+
+消す対象に、**テストだけが呼んでいる関数**があった。それらのテストは
+「新経路が持たないもの」を測っていたので、2 通りに分けた。
+
+| テスト | 扱い | 理由 |
+|---|---|---|
+| `pdfa-conformance.test.ts` の `ensureFileIdentifier` / `ensureSrgbOutputIntent` 計 5 件 | **COS 版へ向け直した** | 検査している条文（R-14.4-7 / -8 / -10 / -11・Table 365・冪等）は新経路にもある。書き手を COS に替え、読み手は pdf-lib のままにした |
+| `pdf-version.test.ts` の `patchHeaderVersion` 2 件 | **消した** | 「保存後のバイト列のヘッダを書き換える」という**前提そのものが無い**。版は `PdfDocumentEditor.create({ version })` がヘッダに直接書く。同じファイルの先頭の describe が生バイトと qpdf で版を測っているので覆いは残る |
+
+これで `npm test` の総数が 463 → 461 になる。
+
+### 3.32.4 🔴 `dist/` を建て直さないと数を誤る
+
+`package.json` から `pdf-lib` を外す判断は「実行時に何を require するか」で決めた。
+最初に数えたときは `dist/` に
+
+```
+dist/services/color-pdflib.js  dist/services/xmp.js  dist/services/annotation.js …
+```
+
+が残っていて `pdf-lib` を require していた。**`tsc` は消えた入力の出力を消さない。**
+`dist/` を退けてから建て直して数え直した:
+
+```
+@modelcontextprotocol/sdk  @pdf-lib/fontkit  @pdf-lib/standard-fonts
+marked  normativepdf  subset-font  zod  （+ node: 標準モジュール）
+```
+
+`@pdf-lib/standard-fonts`（標準 14 書体の AFM = `font-embed.ts` の幅表）は
+これまで **pdf-lib 経由の推移依存**で入っていた。pdf-lib を外すと消えるので、
+dependencies に明示した。
+
+### 3.32.5 残っているもの
+
+- `writer-doc.ts` の `drawText` の引数は「旧実装（pdf-lib の `PDFPage.drawText`）と
+  同じ形」というコメントを持つ。**形を揃える理由はもう無い**ので、
+  L4′.4 以降で見直す
+- Phase 3 §4 の受入 2（UC 回帰の基準値）と 3（veraPDF レポート同梱）は
+  ホストでの veraPDF 実測が要る
+
+### 3.32.6 受入
+
+`npm test` **459 / 461**（2 件は skip）/ `npm run check:fix` 修正なし /
+`npm run oracle` **差なし**（27 検体・qpdf 12.4.0 + veraPDF + 署名検証）。
+素の node のミラー 26 + 20 + 21 + 44 + 34。
+
+---
+
 ## 4. 受入
 
 **3 つとも要る。**
