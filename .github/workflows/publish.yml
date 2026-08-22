@@ -1,0 +1,67 @@
+name: Publish to npm
+
+# Trusted Publisher (npm OIDC): the workflow FILE registered on npmjs.com must
+# be the one that runs `npm publish` — this file. ci.yml stays the watchdog
+# (push/PR); publishing happens per tag, the same split as the rest of the
+# PDF family.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write # Required for Trusted Publisher (npm OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify version matches tag
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: package.json version ($PACKAGE_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $PACKAGE_VERSION"
+
+      # corpus/ is gitignored, but prepublishOnly ends with the corpus gates
+      # (parse + round-trip over pdf20examples) — a clean checkout would fail
+      # them with "corpus is missing". Materialise it first, cached on the
+      # same pin key ci.yml uses.
+      - name: Read the corpus pin
+        id: pin
+        run: echo "sha=$(node -p "require('./corpus.lock.json').veraPDFCorpus.commit")" >> "$GITHUB_OUTPUT"
+      - name: Restore corpus
+        uses: actions/cache@v4
+        with:
+          path: corpus
+          key: corpus-${{ steps.pin.outputs.sha }}
+      - name: Fetch corpus
+        run: npm run corpus:fetch
+
+      # `npm publish` itself runs prepublishOnly: typecheck, test, check,
+      # build, then both corpus gates. Nothing is repeated here — the gate
+      # wired into the publish path IS the point (PUBLISHING.md: the pass rate
+      # backs the claim, per release).
+      #
+      # Trusted Publisher requires npm >= 11.5.1; Node 22 ships npm 10.x, so a
+      # fresh npm is invoked via npx for this one step. Authentication is the
+      # OIDC token exchange — no NODE_AUTH_TOKEN anywhere.
+      - name: Publish to npm
+        run: npx -y npm@latest publish --provenance --access public
