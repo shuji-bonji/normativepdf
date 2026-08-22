@@ -16,11 +16,16 @@
 §3.2.6 fixed / §3.2.7 dynamic）。native は `src/filter/inflate-native.ts` の
 `inflateNative` へ移し、runtime 経路から外した（§3 のとおり）。公開 API は async のまま。
 
-**strict 挙動は native と実測で揃えた**: 着手前に native の挙動を測り
-（trailing junk / truncated / bad Adler-32 = すべてエラー）、同じ入力を同じ向きに拒む。
-拒否 10 形（CM≠8・FCHECK・FDICT・予約ブロック型・NLEN 補数・過剰/不完全 code・
-EOB 無し dynamic code・出力先頭より遠い距離・切断・ADLER32・末尾余剰）は
-ユニットテストで**両実装が拒む**ことを対にして検査している。
+**strict 挙動は native と実測で揃えた** — ただし 1 件、CI（Node 20）が例外を暴いた:
+**trailing junk の扱いは native ではランタイム版依存**だった（Node 20 = 黙って許容・
+Node ≥ 21 = 拒否。着手前の実測は Node 22 で、拒否だけを見ていた）。純 TS 実装は
+RFC 1950 §2.2 を根拠に**常に拒否**で固定し、テストは「pure は必ず拒む・native は
+拒否か正しい復号かのどちらか」に直した。同じ入力に対して挙動がランタイムで変わること
+自体が、自前を正とする ADR-0003 の論拠の実例である。他の拒否
+（truncated / bad Adler-32 / CM≠8 / FCHECK / FDICT / 予約ブロック型 / NLEN 補数 /
+遠すぎる距離）は両実装・全ランタイムで一致する。
+拒否形はユニットテストで**両実装が拒む**ことを対にして検査している
+（末尾余剰のみ上記の理由で「pure は必ず拒む・native はどちらか」）。
 
 **受入（§4 の 2 条件とも充足・2026-08-22 サンドボックス実測）**:
 

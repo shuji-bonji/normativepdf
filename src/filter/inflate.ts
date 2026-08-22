@@ -5,11 +5,14 @@
  * clause it implements, the same discipline the rest of this library
  * applies to ISO 32000.
  *
- * Strictness matches both the RFCs' compliance clauses and the interim
- * native implementation this replaces (measured): a wrong CM, a failed
+ * Strictness follows the RFCs' compliance clauses: a wrong CM, a failed
  * FCHECK, a set FDICT, a reserved block type, a LEN/NLEN mismatch, a
  * distance past the start of the output, a truncated stream, an ADLER32
- * mismatch, and bytes after ADLER32 are all errors, never silence.
+ * mismatch, and bytes after ADLER32 are all errors, never silence. The
+ * interim native implementation agrees on every case but the last, where
+ * its answer depends on the RUNTIME (Node 20 ignores trailing bytes,
+ * Node >= 21 refuses them — measured); pinning that behaviour down is
+ * part of why the pure implementation is the canonical one (ADR-0003).
  *
  * The public shape stays `async` although the body is synchronous —
  * ADR-0003 decision 3: the API does not change when the implementation
@@ -411,8 +414,11 @@ function inflateSync(bytes: Uint8Array): Uint8Array {
   }
   if (reader.pos !== bytes.length - 2) {
     // §2.2: "Any data which may appear after ADLER32 are not part of the
-    // zlib stream" — matching the interim native implementation, which
-    // also refused trailing bytes rather than silently ignoring them.
+    // zlib stream". Refusing them is a choice §2.2 leaves open — and the
+    // interim native implementation decided it BY RUNTIME: Node 20's
+    // DecompressionStream ignores trailing bytes, Node >= 21 refuses them
+    // (measured). A deterministic decoder picks one behaviour; this one
+    // refuses, because bytes it never read are bytes it cannot vouch for.
     throw new FilterError(
       `FlateDecode failed: ${bytes.length - 2 - reader.pos} byte(s) after ADLER32 (RFC 1950 §2.2)`,
     );

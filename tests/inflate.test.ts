@@ -142,12 +142,25 @@ describe('inflate — refusals (both implementations must refuse)', () => {
     await expectBothRefuse(bytes, /ADLER32 mismatch/);
   });
 
-  it('bytes after ADLER32 (RFC 1950 §2.2)', async () => {
+  it('bytes after ADLER32 (RFC 1950 §2.2) — pure refuses; native is runtime-dependent', async () => {
     const clean = valid();
     const bytes = new Uint8Array(clean.length + 2);
     bytes.set(clean, 0);
     bytes[clean.length] = 0x0a;
-    await expectBothRefuse(bytes, /after ADLER32/);
+    // The pure decoder refuses: §2.2 ends the stream at ADLER32, and a
+    // deterministic decoder does not silently ignore bytes it never read.
+    await expect(inflate(bytes)).rejects.toThrow(/after ADLER32/);
+    // 🔴 Native is RUNTIME-DEPENDENT here (measured, CI 2026-08-22):
+    // Node 20's DecompressionStream ignores trailing junk and resolves;
+    // Node >= 21 rejects it ("Trailing junk found ..."). Either way it must
+    // never return anything but the clean decode. This variance — the same
+    // input, two behaviours, decided by the runtime — is the ADR-0003
+    // argument for the pure implementation being canonical.
+    try {
+      expectSameBytes(await inflateNative(bytes), enc('corrupt me'));
+    } catch (cause) {
+      expect(String(cause)).toMatch(/FlateDecode failed/);
+    }
   });
 });
 
