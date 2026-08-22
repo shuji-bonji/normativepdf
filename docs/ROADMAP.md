@@ -223,6 +223,13 @@ flowchart LR
 
 **受入: veraPDF flavour `4` COMPLIANT**
 
+> **着手前調査済み（2026-08-22・[handoff/phase4-scoping.md](handoff/phase4-scoping.md)）**:
+> ① TS 32003/32004/32005 は 3 冊とも pdf-spec-mcp に sponsored 版で入っており**購入判断は不要**。
+> ② Scope 実測 — 32003/32004 は**暗号化**の条文・32005 は **Phase 5 の前提**。
+> ③ 受入の flavour `4` COMPLIANT は **writer 0.20.x（生成 = normativepdf）で 109/109 実測済み** =
+> 暗号化もタグも無しで充足している。→ **Phase 4 の再定義が決裁待ち**（推奨 = 受入充足で閉じ、
+> 暗号化を encrypted 検体 5 件の実需要から新 Phase として起こす。詳細は handoff）
+
 - [ ] TS 32003（AES-GCM）/ 32004（完全性保護）/ 32005（構造名前空間）
 - [ ] **受入: flavour `4` COMPLIANT**
 
