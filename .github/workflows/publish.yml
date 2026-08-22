@@ -55,6 +55,22 @@ jobs:
       - name: Fetch corpus
         run: npm run corpus:fetch
 
+      # The 2,907-specimen gates run on the publish path itself (ROADMAP
+      # operations track, decided 2026-08-22): the claim "the pass rate backs
+      # the release" is only true if the release cannot happen without the
+      # measurement. prepublishOnly's own gate covers pdf20examples (7 files);
+      # these cover the full corpus, with the pure-vs-native inflate oracle on.
+      - name: Install qpdf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qpdf
+      - name: Corpus survey (full, differential oracle on)
+        run: npm run corpus:survey
+        env:
+          NORMATIVEPDF_INFLATE_ORACLE: '1'
+      - name: Round-trip survey (full, differential oracle on)
+        run: npm run roundtrip:survey
+        env:
+          NORMATIVEPDF_INFLATE_ORACLE: '1'
+
       # `npm publish` itself runs prepublishOnly: typecheck, test, check,
       # build, then both corpus gates. Nothing is repeated here — the gate
       # wired into the publish path IS the point (PUBLISHING.md: the pass rate

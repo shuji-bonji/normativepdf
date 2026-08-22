@@ -39,6 +39,11 @@ jobs:
   corpus:
     name: corpus regression (pinned)
     runs-on: ubuntu-latest
+    # The pure-TS inflate is replayed through the interim native
+    # implementation on every decode and must be byte-identical (ADR-0003
+    # decision 5, GUARDS G-6). Measured cost: seconds over the whole corpus.
+    env:
+      NORMATIVEPDF_INFLATE_ORACLE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -86,3 +91,40 @@ jobs:
       # merely available.
       - run: node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf --mode stream
       - run: node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf --mode objstm
+
+  pin-guard:
+    name: pin and code do not change in one commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # corpus.lock.json's own $comment forbids bumping the pin and changing
+      # the implementation in the same commit — a bumped baseline can hide a
+      # regression the old baseline would have caught. Until now that rule was
+      # prose; this makes it mechanical, per commit (not per push), which is
+      # exactly what the rule says.
+      - name: Refuse a lock bump mixed with code changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.base_ref }}..HEAD"
+          elif [ -n "${{ github.event.before }}" ] && git cat-file -e "${{ github.event.before }}" 2>/dev/null; then
+            RANGE="${{ github.event.before }}..HEAD"
+          else
+            RANGE="HEAD^..HEAD"
+          fi
+          echo "checking commits in $RANGE"
+          BAD=0
+          for c in $(git rev-list --no-merges "$RANGE"); do
+            FILES=$(git diff-tree --no-commit-id --name-only -r "$c")
+            if echo "$FILES" | grep -qx 'corpus.lock.json' && echo "$FILES" | grep -q '^src/'; then
+              echo "NG  $c changes corpus.lock.json AND src/ together:"
+              echo "$FILES" | sed 's/^/      /'
+              BAD=1
+            fi
+          done
+          if [ "$BAD" -eq 1 ]; then
+            echo "Split the pin bump into its own commit (corpus.lock.json \$comment rule)."
+            exit 1
+          fi
+          echo "OK  no commit mixes a pin bump with implementation changes"

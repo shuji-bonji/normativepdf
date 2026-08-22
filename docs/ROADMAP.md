@@ -254,7 +254,7 @@ flowchart LR
   - **pass 検体は全件パースする**（veraPDF が COMPLIANT と判定したファイルを読めないのは欠陥）
   - **全体合格率が記録した baseline と一致する**。下回れば後退。**上回っても赤にする** — floor を改善に置き去りにすると、その後 baseline まで滑り戻っても黙って通る。改善と同じコミットで `corpus.lock.json` を上げさせるのが唯一のコスト
   - **T-3 実測（6 通り）**: 正常 = exit 0 / pin 不一致 = 1 / sha ファイル無し = 1 / **パーサを壊す**（xref エントリの EOL から合法形 SP LF を落とす）= 1（pass 検体 2 件 + 2756/2907 で 2 門番とも発火）/ baseline 置き去り = 1 / 戻して緑
-- [ ] 実装と pin の同時更新を禁じる仕組み（今は `corpus.lock.json` の `$comment` に「pin 更新と code 変更を同じコミットに入れない」と書いてあるだけで、機械で止めていない）
+- [x] **実装と pin の同時更新を禁じる仕組み（2026-08-22）** — ci.yml の `pin-guard` ジョブがコミット単位で機械的に止める（`corpus.lock.json` と `src/` を同じコミットで変えたら落ちる。規則の単位が「コミット」なので検査もコミット単位・push 範囲/PR 範囲を rev-list で歩く。落ちる向き・通る向きの両方を使い捨てリポジトリで実測してから入れた）
 - [ ] 独立実装読み戻し（qpdf --check / poppler / veraPDF）— **qpdf と veraPDF は回っている**
       （コーパス往復 3 モードで qpdf 全件 clean・writer の UC オラクルが 29 検体で両方を回す）。
       **poppler は未**。3 つ目の読み手を足すかどうかは、qpdf / veraPDF の両方を通った出力で
@@ -265,7 +265,7 @@ flowchart LR
 ## 運用トラック
 
 - [x] **リリース運用ルール（2026-08-13 に機械化）** — 「合格率が下がったらリリースしない」は CI の corpus job が門番（`corpus.lock.json` の baseline と一致しなければ赤）。**数字は `corpus.lock.json` が正典**で、README / ROADMAP の記載はその写し。「署名は push 前・後から amend しない」は引き続き人間側の規律
-- [ ] 公開そのものの門番（`prepublishOnly` は typecheck/test/check/build/parse-corpus を回すが、**`corpus:survey` は入っていない** = pdf20examples 7 件のゲートだけ。2907 件の門番を publish 経路にも入れるか、CI 必須チェックで代替するかを決める）
+- [x] **公開そのものの門番（決定 2026-08-22: publish 経路に入れる）** — publish.yml が`corpus:survey` / `roundtrip:survey` の 2,907 件門番を**差分オラクル ON で**回してから `npm publish` する。CI 必須チェック代替案は採らなかった — タグ push は branch protection の外にあり、門番とタグの間に隙間が残るため。「リリースごとに証明」（PUBLISHING §2）が公開経路そのものに乗った
 - [ ] 競合監視の定期実行（@cantoo / @pdfme / pdfkit — PUBLISHING §2）
 - [ ] コントリビューション受け入れの仕組み(CONTRIBUTING・Issue テンプレート)
 - [ ] 拡張領域の受け皿（「作らない（当面）」= レンダリング・抽出等は、コントリビューションで拓く。
