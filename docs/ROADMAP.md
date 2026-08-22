@@ -266,11 +266,10 @@ flowchart LR
 
 - [x] **リリース運用ルール（2026-08-13 に機械化）** — 「合格率が下がったらリリースしない」は CI の corpus job が門番（`corpus.lock.json` の baseline と一致しなければ赤）。**数字は `corpus.lock.json` が正典**で、README / ROADMAP の記載はその写し。「署名は push 前・後から amend しない」は引き続き人間側の規律
 - [x] **公開そのものの門番（決定 2026-08-22: publish 経路に入れる）** — publish.yml が`corpus:survey` / `roundtrip:survey` の 2,907 件門番を**差分オラクル ON で**回してから `npm publish` する。CI 必須チェック代替案は採らなかった — タグ push は branch protection の外にあり、門番とタグの間に隙間が残るため。「リリースごとに証明」（PUBLISHING §2）が公開経路そのものに乗った
-- [ ] 競合監視の定期実行（@cantoo / @pdfme / pdfkit — PUBLISHING §2）
-- [ ] コントリビューション受け入れの仕組み(CONTRIBUTING・Issue テンプレート)
-- [ ] 拡張領域の受け皿（「作らない（当面）」= レンダリング・抽出等は、コントリビューションで拓く。
-      受入規律 = 条文に紐づく・測ってある、を CONTRIBUTING に明文化）
-- [ ] 週間 DL 数の記録開始（認知の客観指標）
+- [x] **競合監視の定期実行（2026-08-22）** — Cowork の週次スケジュールタスク「normativepdf 週次競合監視 + DL 記録」（毎週月曜 9:00 JST）。npm 実測（@cantoo/@pdfme/pdfkit の version・time.modified）+ krilla / pdfkit #1591 の動向 + normativepdf の週間 DL 数を毎回記録。PUBLISHING §2 の「何が変わると効くか」に該当したら⚠️ 付きで報告する設計
+- [x] **コントリビューション受け入れの仕組み（2026-08-22）** — CONTRIBUTING.md（英語主）+ CONTRIBUTING.ja.md + Issue テンプレート 2 種（bug = 実測と検体を必須・feature = 条文根拠と測り方を必須）。受入 3 規則 = 条文に紐づく／測ってある（T-3 込み）／pin は単独で動かす
+- [x] **拡張領域の受け皿（2026-08-22）** — CONTRIBUTING「Areas open to contribution」節に明文化。「作らない（当面）」はメンテナの時間の記述であって境界の記述ではない・同じ 3 規則で歓迎・大きい物は Issue で条文根拠と測り方を先に合意、と書いた
+- [x] **週間 DL 数の記録開始（2026-08-22）** — 上の週次スケジュールタスクが毎回 `api.npmjs.org/downloads/point/last-week` を実測して記録する
 
 ---
 
