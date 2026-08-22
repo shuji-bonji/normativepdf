@@ -3,7 +3,7 @@
 > **進捗の正典はこのファイル。** チェックボックスの更新のみで進捗を表す（詳細は各正典文書へ）。
 > 設計の中身は [`DESIGN.md`](DESIGN.md)、公開面は [`PUBLISHING.md`](PUBLISHING.md)、規律は [`GUARDS.md`](GUARDS.md)。
 >
-> 現在地: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+> 現在地: **Phase 1 の残置だった自前 inflate が完了（2026-08-22）** — トリガー 3（段階 2 完了）成立を受けて着手し、RFC 1950/1951 準拠の純 TS 実装が runtime に入った。native は差分オラクルへ降格。差分 1,386 回全一致・門番 2884/2881 維持。これで Phase 0〜3 の実装項目はすべて閉じた。その前: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
 >
 > **次に着手するものは [`handoff/`](handoff/) に 1 件 1 枚で置いてある**（別セッションが 1 枚読めば始められる形）:
 > [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
@@ -49,7 +49,7 @@ flowchart LR
 - [x] 条文調査（§7.5.7/7.5.8.1-3 + §7.4.4/Table 8-10）— 2026-08-11 取得。実装を縛る要点: objstm は**オフセット駆動**で読む（2020 訂正: オブジェクト間空白不要）・objstm 内は「参照のみ」禁止（int int R 誤判別を防ぐ）・xref ストリームは stream 辞書 = trailer 兼務・W 幅 0 = 既定値（type 既定 1）・Index 既定 [0 Size]・**未知 type は null 扱い（エラー禁止）**・Predictor ≥ 10 は行タグで復号（10-15 の区別は復号側で無意味）
 - [x] フィルタ層（decodeStream 境界 + FlateDecode 暫定 = DecompressionStream・parsePdf/getObject async 化 + PNG Predictor 全 5 タグ・TIFF 2 は 8bit のみ・未対応フィルタは名指しエラー。2026-08-11）
 - [x] xref ストリーム読み（W/Index 検証・未知 type = null・stream 辞書 = trailer 兼務）+ オブジェクトストリーム読み（オフセット駆動・XrefEntry に compressed/unknown 追加。Flate+Predictor12 end-to-end smoke + T-3 実測。2026-08-11。**残: hybrid XRefStm は未読・自前 inflate は ADR-0003 のトリガー待ち**）
-- [ ] 自前 inflate（純 TS・**正**。着手トリガーは ADR-0003 = 回復パースの部分回収要求 / 書き側 deflate 要求 / 段階 2 完了のいずれか先着。native は差分オラクルに降格して test に残す）
+- [x] **自前 inflate（純 TS・2026-08-22）** — 着手トリガー 3（段階 2 = pdf-lib 撤去の完了・2026-08-18）が先着して着手。RFC 1950/1951 を ietf MCP で引き、全分岐に条文番号を付けて `src/filter/inflate.ts` を置き換えた（zlib ヘッダ検査・stored/fixed/dynamic・canonical prefix code・LZ77 重なりコピー・Adler-32）。native は `inflate-native.ts` の**差分オラクル**に降格（ADR-0003 決定 5）。受入 = ①差分検査: `NORMATIVEPDF_INFLATE_ORACLE=1` で corpus:survey / roundtrip:survey を回し **1,386 回の比較すべてバイト一致**（不一致を仕込むと parse が落ちることも実測 = 空振りでない）②門番維持: **2884/2907 parsed・2881 round-tripped**（lock どおり・変動なし）。ユニット 61 件（node:zlib 生成の全レベル/全戦略 + 拒否 10 形の native 同挙動）。公開 API は async のまま（決定 3）
 - [x] プロジェクト初期化（tsconfig = ADR-0002 §1・biome・vitest・ESM。2026-08-11）
 - [x] ByteCursor（境界検査を 1 箇所に閉じる）+ レキサ（2026-08-11・条文実例の smoke 12/12 PASS）
 - [x] オブジェクトパーサ（8 種 + 間接参照 + obj/endobj + stream 本体。§7.3.10 補完取得済み・Length 間接は resolver フック・smoke 8/8 + T-3 実測 = 検査を外すと落ちる、を確認。2026-08-11）

@@ -1,7 +1,46 @@
 # 引き継ぎ: 自前 inflate（純 TS）への置き換え — ADR-0003
 
-- 対象リポジトリ: `normativepdf`（この文書のある repo）
+- 対象リポジトリ: `normativepdf`（この文書のある repo)
 - 根拠: [`../adr/0003-filter-strategy.md`](../adr/0003-filter-strategy.md)
+- **✅ 完了（2026-08-22・v0.7.0）。以下は完了した作業の記録として残す。**
+
+## 完了の記録（2026-08-22）
+
+**トリガー判定**: §0 の 3 条件のうち **トリガー 3（段階 2 = pdf-lib 撤去の完了）が先着**した
+（Phase 3 受入充足 2026-08-18・writer 0.20.1）。トリガー 1・2 は来ないままである。
+
+**実装**: `src/filter/inflate.ts` を RFC 1950/1951 準拠の純 TS に置き換えた。
+条文は `ietf` MCP で取得し、全分岐にコメントで条文番号を付けた
+（RFC 1950 §2.2 ヘッダ / §2.3 検査義務 / Adler-32、RFC 1951 §3.1.1 ビット詰め /
+§3.2.2 canonical code / §3.2.3 ブロックとコピー / §3.2.4 stored / §3.2.5 長さ・距離表 /
+§3.2.6 fixed / §3.2.7 dynamic）。native は `src/filter/inflate-native.ts` の
+`inflateNative` へ移し、runtime 経路から外した（§3 のとおり）。公開 API は async のまま。
+
+**strict 挙動は native と実測で揃えた**: 着手前に native の挙動を測り
+（trailing junk / truncated / bad Adler-32 = すべてエラー）、同じ入力を同じ向きに拒む。
+拒否 10 形（CM≠8・FCHECK・FDICT・予約ブロック型・NLEN 補数・過剰/不完全 code・
+EOB 無し dynamic code・出力先頭より遠い距離・切断・ADLER32・末尾余剰）は
+ユニットテストで**両実装が拒む**ことを対にして検査している。
+
+**受入（§4 の 2 条件とも充足・2026-08-22 サンドボックス実測）**:
+
+1. **差分検査** — survey スクリプト 2 本に env ゲートのオラクル
+   （`NORMATIVEPDF_INFLATE_ORACLE=1`）を足し、全 inflate 呼び出しを native と突き合わせた。
+   `corpus:survey` / `roundtrip:survey` とも **1,386 回の比較すべてバイト一致**。
+   オラクルは発火回数を数え、**0 回なら exit 1**（空振りを緑にしない）。
+   native 側に不一致を仕込むと parse が実際に落ちることも実測した
+2. **門番維持** — `baselineParsed` **2884/2907**・`baselineRoundTrip` **2881**
+   （qpdf 差分なし）。lock の値と一致し、上回りも下回りもしない = lock 更新は不要
+
+ユニットは 61 件追加（node:zlib を生成器に、レベル 0/1/6/9 × 既定/Z_FIXED/Z_RLE/
+Z_HUFFMAN_ONLY × 空〜1MB の決定論データ。1MB の比較は `Buffer.compare` —
+vitest の `toEqual` は 1MB 配列で数秒かかりタイムアウトする）。
+既存テストは全緑（計 468 件）・typecheck / biome 緑。
+
+---
+
+以下は着手前の引き継ぎ本文（当時のまま）。
+
 - **⚠️ 着手条件はまだ満たされていない。** 最初にやるのは実装ではなく**トリガー判定**である
 - この文書だけで着手できる。他の引き継ぎを読む必要は無い
 

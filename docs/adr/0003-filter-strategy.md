@@ -1,6 +1,6 @@
 # ADR-0003: ストリームフィルタ戦略 — 自前 inflate を正とし、native を暫定とする
 
-- 状態: **Accepted**
+- 状態: **Accepted・実装済み（2026-08-22）** — トリガー 3（段階 2 完了）成立で純 TS inflate が landed。native は `src/filter/inflate-native.ts` の差分オラクルへ降格（決定 5 のとおり）。経緯は `docs/handoff/own-inflate.md`
 - 日付: 2026-08-11
 - 決定者: shuji
 

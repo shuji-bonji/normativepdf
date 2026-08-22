@@ -24,6 +24,33 @@ import { join, relative } from 'node:path';
 import { dictGetRaw } from '../dist/cos/types.js';
 import { collectObjects, parsePdf, writeFile } from '../dist/index.js';
 
+// Differential oracle (ADR-0003 decision 5, GUARDS G-6): with
+// NORMATIVEPDF_INFLATE_ORACLE=1, every successful pure-TS inflate is
+// replayed through the interim native implementation and must be
+// byte-identical. Zero cost when the variable is unset.
+if (process.env.NORMATIVEPDF_INFLATE_ORACLE === '1') {
+  const { setInflateOracle } = await import('../dist/filter/inflate.js');
+  const { inflateNative } = await import('../dist/filter/inflate-native.js');
+  let oracleCalls = 0;
+  process.on('exit', () => {
+    // A zero here means the oracle never fired — vacuous green, not a pass.
+    console.error(`inflate differential oracle: ${oracleCalls} comparison(s), all byte-identical`);
+    if (oracleCalls === 0) {
+      process.exitCode = 1;
+    }
+  });
+  setInflateOracle(async (input, output) => {
+    oracleCalls += 1;
+    const native = await inflateNative(input);
+    if (native.length !== output.length || Buffer.compare(Buffer.from(native), Buffer.from(output)) !== 0) {
+      throw new Error(
+        `inflate oracle mismatch: pure ${output.length} byte(s), native ${native.length} byte(s)`,
+      );
+    }
+  });
+  console.error('inflate differential oracle: ON');
+}
+
 const root = join(import.meta.dirname, '..');
 const lock = JSON.parse(readFileSync(join(root, 'corpus.lock.json'), 'utf8'));
 
