@@ -273,3 +273,43 @@ export function aesEcbDecryptBlock(key: Uint8Array, block: Uint8Array): Uint8Arr
   decryptBlock(schedule, rounds, block, 0, out, 0);
   return out;
 }
+
+/**
+ * Encrypt one 16-byte block in ECB mode. Two write-side callers:
+ * Algorithm 10 step (f) encrypts the 16-byte Perms block, and AES-GCM's
+ * counter mode (`aes-gcm.ts`) encrypts each counter block — both are the
+ * bare block cipher with no chaining.
+ */
+export function aesEcbEncryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
+  if (block.length !== 16) {
+    throw new RangeError(`ECB block shall be 16 bytes, got ${block.length}`);
+  }
+  const { schedule, rounds } = expandKey(key);
+  const out = new Uint8Array(16);
+  encryptBlock(schedule, rounds, block, 0, out, 0);
+  return out;
+}
+
+/**
+ * Encrypt PKCS#7-padded content data with a 16-byte random IV prefix
+ * (the inverse of {@link aesDecryptIvPrefixed}) — §7.6.3.2/§7.6.3.3 write
+ * side. `iv` is supplied by the caller so the RNG lives in one place.
+ */
+export function aesEncryptIvPrefixed(
+  key: Uint8Array,
+  iv: Uint8Array,
+  plaintext: Uint8Array,
+): Uint8Array {
+  if (iv.length !== 16) {
+    throw new RangeError(`AES IV shall be 16 bytes, got ${iv.length}`);
+  }
+  const padLen = 16 - (plaintext.length % 16); // PKCS#7: 1..16, always at least one block
+  const padded = new Uint8Array(plaintext.length + padLen);
+  padded.set(plaintext);
+  padded.fill(padLen, plaintext.length);
+  const body = aesCbcEncryptNoPad(key, iv, padded);
+  const out = new Uint8Array(16 + body.length);
+  out.set(iv);
+  out.set(body, 16);
+  return out;
+}

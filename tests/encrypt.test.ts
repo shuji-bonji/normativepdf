@@ -209,7 +209,7 @@ describe('refusals name their clause (decision 3: no silent ciphertext)', () => 
     });
     expect(() =>
       buildDocumentDecryptor(base([['V', { kind: 'integer', value: 3 }]]), undefined, undefined),
-    ).toThrow(/V shall be 1, 2, 4 or 5/);
+    ).toThrow(/V shall be 1, 2, 4, 5 or 6/);
     expect(() =>
       buildDocumentDecryptor(
         base([

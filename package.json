@@ -1,6 +1,6 @@
 {
   "name": "normativepdf",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Clause-driven PDF library in pure TypeScript. Every behaviour tied to an ISO 32000 clause; what cannot be tied is not claimed.",
   "keywords": [
     "pdf",

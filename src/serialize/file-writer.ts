@@ -62,6 +62,15 @@ export interface WriteFileOptions {
    * a stream, since its entry format predates them.
    */
   readonly objectStreams?: boolean;
+  /**
+   * Internal: set only by {@link encryptPdf} (`serialize/encrypt-writer.ts`),
+   * which has already encrypted every string and stream and built the
+   * encryption dictionary. It lifts the refusal below — the trailer legitimately
+   * declares /Encrypt and the bytes under it really are ciphertext. Callers must
+   * not set this by hand; the refusal exists so a plaintext body is never
+   * emitted under an /Encrypt entry (ADR-0008 decision 3).
+   */
+  readonly encryptedByEncryptPdf?: boolean;
 }
 
 /**
@@ -187,11 +196,14 @@ export function writeFile(
   // ciphertext this writer never touched. Both are files that lie.
   // Writing encrypted output is the write side of ADR-0008 and is not
   // implemented; refusing is the only honest exit (decision 3).
-  if (dictGetRaw(trailerSource, 'Encrypt') !== undefined) {
+  if (
+    dictGetRaw(trailerSource, 'Encrypt') !== undefined &&
+    options.encryptedByEncryptPdf !== true
+  ) {
     throw new EncryptionError(
-      'writing an encrypted document is not supported (§7.6.2; ADR-0008): the trailer carries /Encrypt ' +
-        'but this writer would emit plaintext strings and streams under it. Drop the entry only if ' +
-        'producing a deliberately decrypted copy is intended — this library will not do it silently',
+      'writing an encrypted document is not supported through writeFile (§7.6.2; ADR-0008): the trailer ' +
+        'carries /Encrypt but this writer would emit plaintext strings and streams under it. Use encryptPdf ' +
+        'to produce an encrypted document; drop the entry only if a deliberately decrypted copy is intended',
     );
   }
 

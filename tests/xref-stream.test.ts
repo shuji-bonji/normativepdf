@@ -229,7 +229,7 @@ describe('cross-reference streams (§7.5.8)', () => {
     // dictionary has no V, so no algorithm is even named (Table 20) — the
     // refusal still names encryption, never the filter.
     await expect(buildWithObjStm(' /Encrypt << /Filter /Standard >>')).rejects.toThrow(
-      /V shall be 1, 2, 4 or 5 \(§7\.6\.2 Table 20\)/,
+      /V shall be 1, 2, 4, 5 or 6 \(§7\.6\.2 Table 20/,
     );
   });
 

@@ -25,6 +25,7 @@ import {
   aesDecryptIvPrefixed,
   aesEcbDecryptBlock,
 } from './aes.js';
+import { aesGcmDecryptIvPrefixed } from './aes-gcm.js';
 import { md5 } from './md5.js';
 import { rc4 } from './rc4.js';
 import { sha256, sha384, sha512 } from './sha2.js';
@@ -44,7 +45,7 @@ export class EncryptionError extends Error {
 }
 
 /** Table 25 CFM values this handler can apply (None is refused by name). */
-export type CryptMethod = 'Identity' | 'RC4' | 'AESV2' | 'AESV3';
+export type CryptMethod = 'Identity' | 'RC4' | 'AESV2' | 'AESV3' | 'AESV4';
 
 /** The facts a caller reads off a parsed Encrypt dictionary (Tables 20/21/25). */
 export interface StandardEncryptParams {
@@ -262,6 +263,19 @@ export class StandardSecurityHandler {
     if (method === 'RC4') {
       return rc4(this.#objectKey(objectNumber, generationNumber, false), data);
     }
+    if (method === 'AESV4') {
+      // ISO/TS 32003 §5.2: 12-byte IV, ciphertext, 16-byte GCM tag; file
+      // key used directly. A failed tag returns null — a tampered object
+      // shall not yield plaintext.
+      const plain = aesGcmDecryptIvPrefixed(this.#fileKey, data);
+      if (plain === null) {
+        throw new EncryptionError(
+          `object ${objectNumber} ${generationNumber}: ${data.length} byte(s) are not valid AES-GCM data — ` +
+            'ISO/TS 32003 §5.2 requires a 12-byte IV, ciphertext, and a 16-byte authentication tag that verifies',
+        );
+      }
+      return plain;
+    }
     // AESV2 / AESV3 — §7.6.3.2 / §7.6.3.3: 16-byte IV prefix, CBC, PKCS#7.
     const key =
       method === 'AESV3' ? this.#fileKey : this.#objectKey(objectNumber, generationNumber, true);
@@ -364,8 +378,12 @@ function xorKey(key: Uint8Array, round: number): Uint8Array {
 /**
  * Algorithm 2.B — the revision 6 iterated hash. `udata` is the 48-byte
  * U string when checking the owner password, empty otherwise.
+ *
+ * Exported because the write side (Algorithms 8/9, `standard-handler-writer.ts`)
+ * derives /U, /UE, /O and /OE with the same hash — one implementation, so a
+ * document this library writes authenticates against the reader it also ships.
  */
-function hash2B(password: Uint8Array, salt: Uint8Array, udata: Uint8Array): Uint8Array {
+export function hash2B(password: Uint8Array, salt: Uint8Array, udata: Uint8Array): Uint8Array {
   let k = sha256(password, salt, udata);
   const unit = new Uint8Array(password.length + 64 + udata.length);
   for (let round = 0; ; round += 1) {

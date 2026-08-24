@@ -45,8 +45,13 @@ export {
   readPageTree,
   withCount,
 } from './doc/page-tree.js';
+export {
+  aesGcmDecryptIvPrefixed,
+  aesGcmEncryptIvPrefixed,
+} from './encrypt/aes-gcm.js';
 export type { EncryptionInfo } from './encrypt/document-decryptor.js';
 export { DocumentDecryptor } from './encrypt/document-decryptor.js';
+export { DocumentEncryptor } from './encrypt/document-encryptor.js';
 export type { DecryptionOptions } from './encrypt/encrypt-dictionary.js';
 export { buildDocumentDecryptor } from './encrypt/encrypt-dictionary.js';
 export type {
@@ -55,6 +60,13 @@ export type {
   StandardEncryptParams,
 } from './encrypt/standard-handler.js';
 export { EncryptionError, StandardSecurityHandler } from './encrypt/standard-handler.js';
+export type {
+  EncryptDictValues,
+  Permissions,
+  RandomBytes,
+  WriteMethod,
+} from './encrypt/standard-handler-writer.js';
+export { deriveEncryptDictValues, encryptBytes } from './encrypt/standard-handler-writer.js';
 export type {
   ParsePdfOptions,
   XrefChain,
@@ -97,6 +109,8 @@ export {
   sniffFontProgram,
   subsetTag,
 } from './font/embedded-font.js';
+export type { EncryptPdfOptions } from './serialize/encrypt-writer.js';
+export { encryptPdf } from './serialize/encrypt-writer.js';
 export type { WritableObject, WriteFileOptions } from './serialize/file-writer.js';
 export { collectObjects, rewrite, writeFile } from './serialize/file-writer.js';
 export type {

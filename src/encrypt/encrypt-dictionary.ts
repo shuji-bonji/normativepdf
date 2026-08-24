@@ -78,11 +78,14 @@ export function buildDocumentDecryptor(
     // Table 20 V: 0 "shall not be used"; 3 is "an unpublished algorithm"
     // that "shall not appear in a conforming PDF file".
     throw new EncryptionError(
-      `encryption dictionary V shall be 1, 2, 4 or 5 (§7.6.2 Table 20), got ${v ?? 'nothing'}`,
+      `encryption dictionary V shall be 1, 2, 4, 5 or 6 (§7.6.2 Table 20; 6 is ISO/TS 32003), got ${v ?? 'nothing'}`,
     );
   }
-  if (v !== 1 && v !== 2 && v !== 4 && v !== 5) {
-    throw new EncryptionError(`encryption algorithm V ${v} is not defined by §7.6.2 Table 20`);
+  if (v !== 1 && v !== 2 && v !== 4 && v !== 5 && v !== 6) {
+    // V 6 is ISO/TS 32003 (AES-GCM); everything else is undefined.
+    throw new EncryptionError(
+      `encryption algorithm V ${v} is not defined by §7.6.2 Table 20 or ISO/TS 32003`,
+    );
   }
 
   const revision = integer(dict, 'R');
@@ -99,16 +102,19 @@ export function buildDocumentDecryptor(
   const revisionOk =
     (v <= 2 && (revision === 2 || revision === 3)) ||
     (v === 4 && revision === 4) ||
-    (v === 5 && revision === 6);
+    (v === 5 && revision === 6) ||
+    (v === 6 && revision === 7); // ISO/TS 32003 §5.1: V 6 ⇒ R 7
   if (!revisionOk) {
     throw new EncryptionError(
-      `security handler revision ${revision} does not go with V ${v} (§7.6.4.2 Table 21: R 2/3 for V < 4, R 4 for V 4, R 6 for V 5)`,
+      `security handler revision ${revision} does not go with V ${v} (§7.6.4.2 Table 21: R 2/3 for V < 4, R 4 for V 4, R 6 for V 5; ISO/TS 32003: R 7 for V 6)`,
     );
   }
 
+  // R 6 and R 7 (V 5 / V 6) both carry the 48-byte AES-256 password strings.
+  const isR6Family = revision === 6 || revision === 7;
   const o = byteString(dict, 'O');
   const u = byteString(dict, 'U');
-  const minOU = revision === 6 ? 48 : 32;
+  const minOU = isR6Family ? 48 : 32;
   if (o === undefined || o.length < minOU || u === undefined || u.length < minOU) {
     throw new EncryptionError(
       `standard security handler requires O and U byte strings of at least ${minOU} bytes for R ${revision} (§7.6.4.2 Table 21)`,
@@ -135,10 +141,11 @@ export function buildDocumentDecryptor(
   // default 40. V 1 is fixed at 40 bits; V 4 files commonly carry
   // Length 128 and Algorithm 1 reads n from it, so it is honoured there
   // too (default 128 for V 4 — the only length AESV2/V2-with-V4 use).
-  const lengthBits = integer(dict, 'Length') ?? (v === 2 ? 40 : v === 4 ? 128 : v === 5 ? 256 : 40);
+  const lengthBits =
+    integer(dict, 'Length') ?? (v === 2 ? 40 : v === 4 ? 128 : v === 5 || v === 6 ? 256 : 40);
   if (lengthBits % 8 !== 0 || lengthBits < 40 || lengthBits > 256) {
     throw new EncryptionError(
-      `encryption key Length shall be a multiple of 8 in 40..128 bits (§7.6.2 Table 20; 256 for V 5 per Table 25 AESV3), got ${lengthBits}`,
+      `encryption key Length shall be a multiple of 8 in 40..128 bits (§7.6.2 Table 20; 256 for V 5/6 per Table 25 AESV3/AESV4), got ${lengthBits}`,
     );
   }
   const keyBytes = v === 1 ? 5 : lengthBits / 8;
@@ -162,7 +169,7 @@ export function buildDocumentDecryptor(
   let streamMethod: CryptMethod;
   let stringMethod: CryptMethod;
   const cryptFilters = new Map<string, CryptMethod>();
-  if (v === 4 || v === 5) {
+  if (v === 4 || v === 5 || v === 6) {
     const cf = dictGet(dict, 'CF');
     if (cf !== undefined) {
       if (cf.kind !== 'dict') {
@@ -228,6 +235,14 @@ function cryptFilterMethod(cfName: string, value: CosObject, v: number): CryptMe
         );
       }
       return 'AESV3';
+    case 'AESV4':
+      // ISO/TS 32003 §5.1: AESV4 (AES-GCM) is declared with V 6.
+      if (v !== 6) {
+        throw new EncryptionError(
+          `crypt filter method AESV4 requires V 6 (ISO/TS 32003 §5.1: AES-GCM, key size 256 bits), the dictionary declares V ${v}`,
+        );
+      }
+      return 'AESV4';
     case 'None':
       // Table 25: "the application shall not decrypt data but shall
       // direct the input stream to the security handler" — a private

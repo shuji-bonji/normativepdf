@@ -32,6 +32,7 @@ the result that clause violations can be *identified* but not *fixed*
 | [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus) (CC BY 4.0, 2907 specimens, Isartor included) | **2886/2907 parsed (99.3%); every *pass* specimen parses.** All 21 failures are *fail* specimens, intentionally broken and rejected with the violated clause named. The corpus's 4 encrypted specimens (RC4, AES-128-CBC, AES-256-CBC) parse **decrypted** — §7.6 standard security handler, read side (ADR-0008); a document this library cannot decrypt is refused by name, never handed out as ciphertext |
 | Round-trip (read → write → read), all three output forms | **2881/2881** with an equal object graph — classic table, cross-reference stream, and object streams |
 | `qpdf --check`, source vs rewrite | **2881/2881 introduce no complaint the source did not already have**, in all three forms |
+| Encryption, write side (`encryptPdf`) | **AES-256-CBC (AESV3) and AES-GCM (AESV4, ISO/TS 32003)** — an AESV3 document is decrypted whole by qpdf (independent); an AESV4 document is decrypted per object by node:crypto (independent AES-GCM), since no PDF tool in reach reads AES-GCM |
 | Incremental update on a signed specimen | **Both signatures stay VALID** (CAdES + document timestamp), whichever cross-reference form is appended |
 
 The corpus is pinned by commit ([`corpus.lock.json`](corpus.lock.json)) so that a
