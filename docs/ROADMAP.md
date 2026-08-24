@@ -3,7 +3,7 @@
 > **進捗の正典はこのファイル。** チェックボックスの更新のみで進捗を表す（詳細は各正典文書へ）。
 > 設計の中身は [`DESIGN.md`](DESIGN.md)、公開面は [`PUBLISHING.md`](PUBLISHING.md)、規律は [`GUARDS.md`](GUARDS.md)。
 >
-> 現在地: **Phase 1 の残置だった自前 inflate が完了（2026-08-22）** — トリガー 3（段階 2 完了）成立を受けて着手し、RFC 1950/1951 準拠の純 TS 実装が runtime に入った。native は差分オラクルへ降格。差分 1,386 回全一致・門番 2884/2881 維持。これで Phase 0〜3 の実装項目はすべて閉じた。その前: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+> 現在地: **Phase 4 を「暗号化」に再定義（2026-08-24・[ADR-0008](adr/0008-phase4-encryption.md)・決裁 = 案 A）** — 受入は充足済みの実測として記録し、コーパスの暗号化 4 検体を実測needs とする読み側復号から着手する。その前: **Phase 1 の残置だった自前 inflate が完了（2026-08-22）** — トリガー 3（段階 2 完了）成立を受けて着手し、RFC 1950/1951 準拠の純 TS 実装が runtime に入った。native は差分オラクルへ降格。差分 1,386 回全一致・門番 2884/2881 維持。これで Phase 0〜3 の実装項目はすべて閉じた。その前: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
 >
 > **次に着手するものは [`handoff/`](handoff/) に 1 件 1 枚で置いてある**（別セッションが 1 枚読めば始められる形）:
 > [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
@@ -15,7 +15,7 @@ flowchart LR
     P0["P0 準備<br/>✅ 2026-08-08"] --> P1["P1 調査・段階0<br/>COS+パーサ ✅"]
     P1 --> P2["P2 段階1<br/>シリアライザ ✅"]
     P2 --> P3["P3 段階2<br/>生成パス = pdf-lib 撤去 ✅"]
-    P3 --> P4["P4 段階3<br/>PDF 2.0 実体"]
+    P3 --> P4["P4 段階3<br/>暗号化（ADR-0008）"]
     P4 --> P5["P5 段階4<br/>UA-2 / WTPDF"]
     P3 -.-> T1["試験: Editor PWA"]
     P3 -.-> T2["運用: e-shiwake"]
@@ -219,19 +219,22 @@ flowchart LR
       移行の過程で normativepdf 側に足したもの = `PdfDocumentEditor.create()` / コンテンツストリームビルダ /
       フォント辞書 / 構造木 / 宣言。**要求はすべて第 1 消費者から立った**
 
-## Phase 4: 段階 3 — PDF 2.0 の実体
+## Phase 4: 段階 3 — 暗号化（再定義 = [ADR-0008](adr/0008-phase4-encryption.md)・2026-08-24）
 
-**受入: veraPDF flavour `4` COMPLIANT**
+**受入: 暗号化 4 検体の完全読み（復号後 decode まで通る）+ 暗号文を黙って返す経路が無いこと**
 
-> **着手前調査済み（2026-08-22・[handoff/phase4-scoping.md](handoff/phase4-scoping.md)）**:
-> ① TS 32003/32004/32005 は 3 冊とも pdf-spec-mcp に sponsored 版で入っており**購入判断は不要**。
-> ② Scope 実測 — 32003/32004 は**暗号化**の条文・32005 は **Phase 5 の前提**。
-> ③ 受入の flavour `4` COMPLIANT は **writer 0.20.x（生成 = normativepdf）で 109/109 実測済み** =
-> 暗号化もタグも無しで充足している。→ **Phase 4 の再定義が決裁待ち**（推奨 = 受入充足で閉じ、
-> 暗号化を encrypted 検体 5 件の実需要から新 Phase として起こす。詳細は handoff）
+> **再定義の決裁（2026-08-24・shuji・案 A）**: 旧受入「veraPDF flavour `4` COMPLIANT」は
+> **writer 0.20.x（生成 = normativepdf）の 109/109 で充足済みの実測**として記録し、受入から外した。
+> TS 32005 は Phase 5 へ（もともと構造ツリーの条文）。着手前調査 =
+> [handoff/phase4-scoping.md](handoff/phase4-scoping.md)（TS 3 冊とも sponsored 版で条文入手済み・購入判断不要）。
+> **実測needs = コーパスの暗号化 4 検体**（RC4 V2/R3・AES-128-CBC V4/R4 ×2・AES-256-CBC V5/R6。
+> うち 2 件は §7.6 名指しエラー・**2 件は暗号文を黙って返す** = pdf-lib `ignoreEncryption` と同じ形。
+> 検体名と方式の表は ADR-0008）
 
-- [ ] TS 32003（AES-GCM）/ 32004（完全性保護）/ 32005（構造名前空間）
-- [ ] **受入: flavour `4` COMPLIANT**
+- [ ] 読み側: §7.6.4 標準セキュリティハンドラの復号（RC4 / AES-128-CBC / AES-256-CBC・まず空パスワード。公開鍵ハンドラ §7.6.5 は作らない）
+- [ ] 読み側: 復号できないとき `getObject` は常に名指しエラー — 暗号文を黙って返す経路を無くす（T-3 の実測根拠 = 現状の 2 検体）
+- [ ] 書き側: TS 32003（AES-GCM）/ 32004（MAC）— 着手条件 = 読み側完了 + 実需要（書きの要求はまだ 0 件）
+- [ ] **受入: 暗号化 4 検体で parsePdf + 全 in-use/compressed の getObject + getCatalog 成功・Flate 含みストリームが復号後に decode まで通る**
 
 ## Phase 5: 段階 4 — PDF/UA-2 + WTPDF
 
