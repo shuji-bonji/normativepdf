@@ -33,6 +33,9 @@
 
 import type { CosDict, CosObject, CosRef } from '../cos/types.js';
 import { COS_NULL, dictGet } from '../cos/types.js';
+import type { DocumentDecryptor, EncryptionInfo } from '../encrypt/document-decryptor.js';
+import { buildDocumentDecryptor, type DecryptionOptions } from '../encrypt/encrypt-dictionary.js';
+import { EncryptionError } from '../encrypt/standard-handler.js';
 import { isWhitespace } from '../syntax/byte-classes.js';
 import { ByteCursor } from '../syntax/byte-cursor.js';
 import { ParseError, parseIndirectObject, parseObject } from '../syntax/object-parser.js';
@@ -169,6 +172,16 @@ const STARTXREF = [0x73, 0x74, 0x61, 0x72, 0x74, 0x78, 0x72, 0x65, 0x66]; // sta
 const EOF_MARKER = [0x25, 0x25, 0x45, 0x4f, 0x46]; // %%EOF
 
 /**
+ * Documents `parsePdf` is currently bootstrapping: the encryption
+ * dictionary must be fetched before any decryptor can exist, so exactly
+ * one fetch path runs with the trailer saying "encrypted" and no
+ * decryptor attached. Every OTHER document in that state refuses
+ * `getObject` by name (ADR-0008 decision 3) — two corpus specimens used
+ * to hand ciphertext back as if it were plaintext through that gap.
+ */
+const BOOTSTRAP_DOCS = new WeakSet<PdfDocument>();
+
+/**
  * A parsed PDF file: merged cross-reference information plus an object
  * resolver. Construction validates structure; it does not validate
  * conformance.
@@ -198,10 +211,17 @@ export class PdfDocument {
    * it whole would drop what was never seen.
    */
   readonly chainStop: XrefChainStop;
+  /**
+   * Encryption facts when the document is encrypted and was opened
+   * through `parsePdf` (§7.6) — undefined for unencrypted documents.
+   * Observations only; conformance verdicts stay with pdf-verify-mcp.
+   */
+  readonly encryption: EncryptionInfo | undefined;
 
   readonly #cache = new Map<string, CosObject>();
   readonly #inFlight = new Set<string>();
   readonly #objStmCache = new Map<number, Promise<ParsedObjectStream>>();
+  readonly #decryptor: DocumentDecryptor | undefined;
 
   constructor(
     bytes: Uint8Array,
@@ -211,6 +231,7 @@ export class PdfDocument {
     trailer: CosDict,
     xref: ReadonlyMap<number, XrefEntry>,
     chainStop: XrefChainStop = { kind: 'complete' },
+    decryptor?: DocumentDecryptor,
   ) {
     this.bytes = bytes;
     this.origin = origin;
@@ -219,6 +240,8 @@ export class PdfDocument {
     this.trailer = trailer;
     this.xref = xref;
     this.chainStop = chainStop;
+    this.#decryptor = decryptor;
+    this.encryption = decryptor?.info;
   }
 
   /**
@@ -228,6 +251,22 @@ export class PdfDocument {
    * Async because compressed objects live in filtered object streams.
    */
   async getObject(objectNumber: number, generationNumber = 0): Promise<CosObject> {
+    // ADR-0008 decision 3: an encrypted document without a decryptor
+    // never hands objects out. Before this guard, a classic-table
+    // encrypted file (whose parse touches nothing that needs decoding)
+    // returned every stream as ciphertext wearing a plaintext face —
+    // two corpus specimens did exactly that (isartor-6-1-3-t02-fail-a,
+    // PDF_A-2b 6-1-3-t02-fail-a). The one exception is the bootstrap
+    // fetch of the encryption dictionary itself, which `parsePdf` marks.
+    if (
+      this.#decryptor === undefined &&
+      !BOOTSTRAP_DOCS.has(this) &&
+      dictGet(this.trailer, 'Encrypt') !== undefined
+    ) {
+      throw new EncryptionError(
+        'encrypted PDF: objects cannot be handed out undecrypted (§7.6; ADR-0008). Open the document through parsePdf, which authenticates and attaches decryption',
+      );
+    }
     const key = `${objectNumber} ${generationNumber}`;
     const cached = this.#cache.get(key);
     if (cached !== undefined) {
@@ -289,8 +328,18 @@ export class PdfDocument {
           this.origin + entry.offset,
         );
       }
-      this.#cache.set(key, parsed.object);
-      return parsed.object;
+      // §7.6.2: strings and streams of an encrypted document are
+      // ciphertext at rest — materialisation is where they become the
+      // values the rest of the library works with. Objects inside object
+      // streams are NOT re-transformed (`objectFromStream` path): the
+      // clause excepts "strings that are inside streams", because the
+      // container stream was decrypted as a whole.
+      const object =
+        this.#decryptor === undefined
+          ? parsed.object
+          : this.#decryptor.transform(parsed.object, objectNumber, generationNumber);
+      this.#cache.set(key, object);
+      return object;
     } finally {
       this.#inFlight.delete(key);
     }
@@ -341,11 +390,12 @@ export class PdfDocument {
       // (§7.6). Object streams in an encrypted file are encrypted as whole
       // streams; inflating the ciphertext would fail with a misleading
       // filter error (observed: veraPDF-corpus "7.16-t01-fail-a.pdf",
-      // "6-1-3-t02-fail-a.pdf" reported "FlateDecode failed"). Decryption
-      // is not implemented — name the real reason instead.
-      if (dictGet(this.trailer, 'Encrypt') !== undefined) {
+      // "6-1-3-t02-fail-a.pdf" reported "FlateDecode failed"). With a
+      // decryptor attached, #parseInUse has already decrypted the
+      // container stream; without one, name the real reason.
+      if (this.#decryptor === undefined && dictGet(this.trailer, 'Encrypt') !== undefined) {
         throw new ParseError(
-          'encrypted PDF: stream decryption is not supported yet (§7.6; trailer Encrypt entry, §7.5.5 Table 15)',
+          'encrypted PDF: stream decryption is not attached (§7.6; trailer Encrypt entry, §7.5.5 Table 15). Open the document through parsePdf',
           this.origin,
         );
       }
@@ -481,8 +531,11 @@ export async function readXrefSectionAt(
   return parseSection(bytes, at, offset);
 }
 
+/** Options for {@link parsePdf}. Only encrypted documents read any of them (§7.6). */
+export type ParsePdfOptions = DecryptionOptions;
+
 /** Parse a complete PDF file (classic tables, cross-reference streams, hybrid files). */
-export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
+export async function parsePdf(bytes: Uint8Array, options?: ParsePdfOptions): Promise<PdfDocument> {
   const { origin, headerVersion: version, startxref, sections, stop } = await readXrefChain(bytes);
 
   const newest = sections[0];
@@ -514,7 +567,36 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
     }
   }
 
-  const doc = new PdfDocument(bytes, origin, version, version, newest.trailer, merged, stop);
+  // §7.6: an Encrypt entry in the trailer means strings and streams are
+  // ciphertext. The encryption dictionary itself has to be fetched before
+  // any decryptor exists — that one fetch runs on a bootstrap document
+  // marked in BOOTSTRAP_DOCS; everything after runs decrypted. Order
+  // matters: the catalog /Version read below may live in an encrypted
+  // object stream, so the decryptor must exist first.
+  const encryptEntry = dictGet(newest.trailer, 'Encrypt');
+  let decryptor: DocumentDecryptor | undefined;
+  if (encryptEntry !== undefined) {
+    const boot = new PdfDocument(bytes, origin, version, version, newest.trailer, merged, stop);
+    BOOTSTRAP_DOCS.add(boot);
+    const encryptDict = await boot.resolve(encryptEntry);
+    decryptor = buildDocumentDecryptor(
+      encryptDict,
+      encryptEntry.kind === 'ref' ? encryptEntry.objectNumber : undefined,
+      readIdFirst(newest.trailer),
+      options,
+    );
+  }
+
+  const doc = new PdfDocument(
+    bytes,
+    origin,
+    version,
+    version,
+    newest.trailer,
+    merged,
+    stop,
+    decryptor,
+  );
 
   // §7.7.2 Table 29 Version: "The version of the PDF specification to which
   // the document conforms … if later than the version specified in the
@@ -525,9 +607,34 @@ export async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
   // header 1.7 and catalog /Version /2.0.
   const catalogVersion = await readCatalogVersion(doc);
   if (catalogVersion !== undefined && isLaterVersion(catalogVersion, version)) {
-    return new PdfDocument(bytes, origin, version, catalogVersion, newest.trailer, merged, stop);
+    return new PdfDocument(
+      bytes,
+      origin,
+      version,
+      catalogVersion,
+      newest.trailer,
+      merged,
+      stop,
+      decryptor,
+    );
   }
   return doc;
+}
+
+/**
+ * First element of the trailer /ID as bytes (§7.5.5 Table 15: "required
+ * if an Encrypt entry is present"; its values are excepted from
+ * encryption by §7.6.2 and shall be direct). Undefined when absent or
+ * not the shape Table 15 describes — the caller decides whether the
+ * revision in play can live without it.
+ */
+function readIdFirst(trailer: CosDict): Uint8Array | undefined {
+  const id = dictGet(trailer, 'ID');
+  if (id === undefined || id.kind !== 'array') {
+    return undefined;
+  }
+  const first = id.items[0];
+  return first !== undefined && first.kind === 'string' ? first.bytes : undefined;
 }
 
 /**

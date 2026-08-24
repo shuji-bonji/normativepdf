@@ -38,6 +38,22 @@ export async function decodeStream(
     if (name === undefined) {
       continue;
     }
+    if (name === 'Crypt') {
+      // §7.4.10: the Crypt filter marks where decryption sits in the
+      // chain, and decryption is not a byte-transform this layer can
+      // perform — it happened (or was skipped, for /Identity) when the
+      // object was materialised from its document (§7.6.6,
+      // encrypt/document-decryptor.ts). By the time bytes reach this
+      // function they are already what the next filter expects, so
+      // /Identity (the Table 14 default) passes through. A NAMED crypt
+      // filter means "this stream's ciphertext needs the document's CF
+      // entry"; when the stream came through a document decryptor that
+      // has already happened and the pass-through is correct — and when
+      // it did not, no key exists at this layer, so refusing would also
+      // refuse every legitimately decrypted stream. The decryptor is the
+      // layer that refuses unknown names (encrypt/document-decryptor.ts).
+      continue;
+    }
     if (name !== 'FlateDecode') {
       throw new FilterError(`filter /${name} is not supported yet (§7.4)`);
     }

@@ -174,7 +174,8 @@ function diffDict(a, b, path, ignore = new Set()) {
 /**
  * Outcomes are three-valued on purpose. "Could not be measured" is not a pass
  * and not a failure: an encrypted document cannot be round-tripped because
- * decryption is not implemented, and counting it either way would misstate
+ * write-side encryption is not implemented (ADR-0008 — reading decrypts,
+ * writing refuses), and counting it either way would misstate
  * what was tested (GUARDS T-4).
  */
 async function roundTrip(bytes) {
@@ -185,7 +186,11 @@ async function roundTrip(bytes) {
     return { outcome: 'unreadable', reason: message(error) };
   }
   if (dictGetRaw(source.trailer, 'Encrypt') !== undefined) {
-    return { outcome: 'not-measurable', reason: 'encrypted (§7.6; decryption not implemented)' };
+    return {
+      outcome: 'not-measurable',
+      reason:
+        'encrypted (§7.6.2; ADR-0008: reading decrypts, but write-side encryption is not implemented — writing these back would strip their protection, so the round trip stays unmeasured)',
+    };
   }
   // 🔴 A document whose /Prev chain could not be walked to the end is one the
   // library refuses to rewrite: `rewrite` and `PdfDocumentEditor.save` both
@@ -411,7 +416,7 @@ try {
 const attempted = counts.ok + counts.mismatch + counts['write-failed'] + counts['reparse-failed'];
 console.log(`\nround-trip ${counts.ok}/${attempted} of the specimens this parser can read`);
 console.log(
-  `  file unreadable: ${counts.unreadable}   an object unreadable: ${counts['source-unreadable']}   not measurable (encrypted): ${counts['not-measurable']}`,
+  `  file unreadable: ${counts.unreadable}   an object unreadable: ${counts['source-unreadable']}   not measurable: ${counts['not-measurable']}`,
 );
 
 const sorted = [...groups.entries()].sort((a, b) => b[1].count - a[1].count);

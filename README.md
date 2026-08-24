@@ -29,7 +29,7 @@ the result that clause violations can be *identified* but not *fixed*
 | Gate | Result |
 |---|---|
 | [pdf20examples](https://github.com/pdf-association/pdf20examples) (CC BY-SA 4.0) | **7/7 parsed** end-to-end (every in-use/compressed object resolved, catalog included) |
-| [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus) (CC BY 4.0, 2907 specimens, Isartor included) | **2884/2907 parsed (99.2%); every *pass* specimen parses.** All 23 failures are *fail* specimens: 21 intentionally broken, rejected with the violated clause named, and 2 encrypted (stream decryption is not implemented) |
+| [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus) (CC BY 4.0, 2907 specimens, Isartor included) | **2886/2907 parsed (99.3%); every *pass* specimen parses.** All 21 failures are *fail* specimens, intentionally broken and rejected with the violated clause named. The corpus's 4 encrypted specimens (RC4, AES-128-CBC, AES-256-CBC) parse **decrypted** — §7.6 standard security handler, read side (ADR-0008); a document this library cannot decrypt is refused by name, never handed out as ciphertext |
 | Round-trip (read → write → read), all three output forms | **2881/2881** with an equal object graph — classic table, cross-reference stream, and object streams |
 | `qpdf --check`, source vs rewrite | **2881/2881 introduce no complaint the source did not already have**, in all three forms |
 | Incremental update on a signed specimen | **Both signatures stay VALID** (CAdES + document timestamp), whichever cross-reference form is appended |

@@ -26,7 +26,7 @@ family の書き手は現在 `pdf-lib` に委譲しており、条文違反を�
 | 門番 | 結果 |
 |---|---|
 | [pdf20examples](https://github.com/pdf-association/pdf20examples)（CC BY-SA 4.0） | **7/7 パース**（全 in-use/compressed オブジェクトの解決 + catalog まで） |
-| [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus)（CC BY 4.0・2907 検体・Isartor 同梱） | **2884/2907 パース（99.2%）・pass 検体は全件通過。** 落ちる 23 件はすべて fail 検体で、内訳は意図的破損 21（違反条項を名指しして拒否）+ 暗号化 2（ストリーム復号は未実装） |
+| [veraPDF-corpus](https://github.com/veraPDF/veraPDF-corpus)（CC BY 4.0・2907 検体・Isartor 同梱） | **2886/2907 パース（99.3%）・pass 検体は全件通過。** 落ちる 21 件はすべて意図的破損の fail 検体（違反条項を名指しして拒否）。コーパスの暗号化 4 検体（RC4・AES-128-CBC・AES-256-CBC）は**復号して**パースする — §7.6 標準セキュリティハンドラの読み側（ADR-0008）。復号できない文書は名指しで拒否し、暗号文を平文の顔で返すことはない |
 | 往復（read → write → read）・出力 3 形式 | **2881/2881** がオブジェクトグラフ一致（古典テーブル / xref ストリーム / オブジェクトストリーム） |
 | `qpdf --check`（元 vs 書き戻し） | **3 形式とも 2881/2881 で、元に無い苦情を出さない** |
 | 署名検体への増分更新 | **署名 2 本（CAdES + 文書タイムスタンプ）とも VALID を維持**。追記する xref の形式を問わない |

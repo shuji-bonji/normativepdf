@@ -45,7 +45,18 @@ export {
   readPageTree,
   withCount,
 } from './doc/page-tree.js';
+export type { EncryptionInfo } from './encrypt/document-decryptor.js';
+export { DocumentDecryptor } from './encrypt/document-decryptor.js';
+export type { DecryptionOptions } from './encrypt/encrypt-dictionary.js';
+export { buildDocumentDecryptor } from './encrypt/encrypt-dictionary.js';
 export type {
+  AuthenticationResult,
+  CryptMethod,
+  StandardEncryptParams,
+} from './encrypt/standard-handler.js';
+export { EncryptionError, StandardSecurityHandler } from './encrypt/standard-handler.js';
+export type {
+  ParsePdfOptions,
   XrefChain,
   XrefChainStop,
   XrefCompressed,

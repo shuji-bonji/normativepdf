@@ -222,10 +222,15 @@ describe('cross-reference streams (§7.5.8)', () => {
   });
 
   it('names encryption instead of failing the filter: object streams in an encrypted file are ciphertext (§7.5.5 Table 15 Encrypt, §7.6)', async () => {
-    // Observed in veraPDF-corpus ("7.16-t01-fail-a.pdf"): without the gate
-    // the ciphertext reaches FlateDecode and the error blames the filter.
-    const doc = await buildWithObjStm(' /Encrypt << /Filter /Standard >>');
-    await expect(doc.getObject(2, 0)).rejects.toThrow(/encrypted PDF/);
+    // Observed in veraPDF-corpus ("7.16-t01-fail-a.pdf"): before ADR-0008
+    // the ciphertext reached FlateDecode and the error blamed the filter;
+    // then a named "not supported yet" gate sat on the object-stream path.
+    // Now parsePdf refuses while bootstrapping the decryptor: this
+    // dictionary has no V, so no algorithm is even named (Table 20) — the
+    // refusal still names encryption, never the filter.
+    await expect(buildWithObjStm(' /Encrypt << /Filter /Standard >>')).rejects.toThrow(
+      /V shall be 1, 2, 4 or 5 \(§7\.6\.2 Table 20\)/,
+    );
   });
 
   it('rejects a wrong W shape (Table 17)', async () => {

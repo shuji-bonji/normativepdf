@@ -23,6 +23,7 @@
 
 import type { CosDict, CosObject } from '../cos/types.js';
 import { dictGetRaw } from '../cos/types.js';
+import { EncryptionError } from '../encrypt/standard-handler.js';
 import { type PdfDocument, TruncatedHistoryError } from '../file/file-parser.js';
 import type { CompressedPlacement } from './object-stream-writer.js';
 import { buildObjectStream, partitionForObjectStream } from './object-stream-writer.js';
@@ -174,6 +175,23 @@ export function writeFile(
   if (!/^[12]\.[0-9]$/.test(version)) {
     throw new RangeError(
       `file header shall be %PDF-1.n or %PDF-2.n with n a single digit (§7.5.2); got ${version}`,
+    );
+  }
+
+  // §7.6.2: "Encryption applies to all strings and streams in the
+  // document's PDF file". This writer emits the objects it is given as
+  // plaintext; a trailer carrying /Encrypt would therefore describe a
+  // document whose contents do not match its own declaration — either
+  // decrypted objects under an Encrypt entry (a parsed encrypted file,
+  // whose strings and streams were decrypted at materialisation) or
+  // ciphertext this writer never touched. Both are files that lie.
+  // Writing encrypted output is the write side of ADR-0008 and is not
+  // implemented; refusing is the only honest exit (decision 3).
+  if (dictGetRaw(trailerSource, 'Encrypt') !== undefined) {
+    throw new EncryptionError(
+      'writing an encrypted document is not supported (§7.6.2; ADR-0008): the trailer carries /Encrypt ' +
+        'but this writer would emit plaintext strings and streams under it. Drop the entry only if ' +
+        'producing a deliberately decrypted copy is intended — this library will not do it silently',
     );
   }
 

@@ -31,6 +31,7 @@
 
 import type { CosDict, CosObject } from '../cos/types.js';
 import { dictGetRaw } from '../cos/types.js';
+import { EncryptionError } from '../encrypt/standard-handler.js';
 import type { PdfDocument } from '../file/file-parser.js';
 import type { WritableObject } from './file-writer.js';
 import { ByteWriter, writeIndirectObject, writeObject } from './object-writer.js';
@@ -160,6 +161,20 @@ export interface AppendUpdateResult {
 export function appendUpdate(input: AppendUpdateInput): AppendUpdateResult {
   const { original, previousXrefOffset, previousTrailer, objects, deleted = [] } = input;
   const origin = input.origin ?? 0;
+
+  // §7.6.2: in an encrypted document every string and stream is
+  // encrypted — including the ones an update section adds. This module
+  // writes the supplied objects as plaintext, so appending to a document
+  // whose trailer (carried into the update trailer by §7.5.6) declares
+  // /Encrypt would produce a revision that violates the declaration it
+  // itself repeats. Encrypted writing is ADR-0008's write side, not
+  // implemented; refused by name (decision 3).
+  if (dictGetRaw(previousTrailer, 'Encrypt') !== undefined) {
+    throw new EncryptionError(
+      'appending to an encrypted document is not supported (§7.6.2; ADR-0008): the update would add ' +
+        'plaintext strings and streams to a document whose trailer declares them encrypted',
+    );
+  }
 
   if (objects.length === 0 && deleted.length === 0) {
     throw new RangeError(
