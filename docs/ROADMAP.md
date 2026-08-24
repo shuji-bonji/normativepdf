@@ -3,7 +3,7 @@
 > **進捗の正典はこのファイル。** チェックボックスの更新のみで進捗を表す（詳細は各正典文書へ）。
 > 設計の中身は [`DESIGN.md`](DESIGN.md)、公開面は [`PUBLISHING.md`](PUBLISHING.md)、規律は [`GUARDS.md`](GUARDS.md)。
 >
-> 現在地: **Phase 4（暗号化）読み側 + 書き側 landed（2026-08-24）** — 読み = §7.6 標準ハンドラ復号（RC4/AES-CBC/AES-GCM）・暗号化 4 検体が空パスワードで完全読み。書き = `encryptPdf`（AESV3 は qpdf が全体復号・AESV4 は node:crypto が独立復号で受入）。parse 門番 2886/2907・往復 2881 維持。残 = TS 32004 MAC（独立検証器不在で defer）とリリース。同日 [ADR-0008](adr/0008-phase4-encryption.md)（決裁 = 案 A）で再定義した Phase の実装第一波。その前: **Phase 1 の残置だった自前 inflate が完了（2026-08-22）** — トリガー 3（段階 2 完了）成立を受けて着手し、RFC 1950/1951 準拠の純 TS 実装が runtime に入った。native は差分オラクルへ降格。差分 1,386 回全一致・門番 2884/2881 維持。これで Phase 0〜3 の実装項目はすべて閉じた。その前: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
+> 現在地: **v0.8.0 公開（2026-08-24）= Phase 4（暗号化）読み側 + 書き側** — 読み = §7.6 標準ハンドラ復号（RC4/AES-CBC/AES-GCM）・暗号化 4 検体が空パスワードで完全読み。書き = `encryptPdf`（AESV3 は qpdf が全体復号・AESV4 は node:crypto が独立復号で受入）。parse 門番 2886/2907・往復 2881 維持。**tag v0.8.0 → publish.yml 経由の初リリース**（2,907 件門番を通ってから OIDC 公開。**公開版検証 PASS** = 77 エクスポート・公開版 `encryptPdf` の出力を qpdf が独立復号・`--check` clean）。残 = TS 32004 MAC（独立検証器不在で defer・要求駆動）。同日 [ADR-0008](adr/0008-phase4-encryption.md)（決裁 = 案 A）で再定義した Phase の実装第一波。同日 [ADR-0009](adr/0009-highlevel-document-package.md)（決裁 = shuji）で**高レベル層 `@normativepdf/document` を別パッケージ・独立リポジトリとして建てる**ことを決めた（進捗は下の「高レベル層トラック」）。その前: **Phase 1 の残置だった自前 inflate が完了（2026-08-22）** — トリガー 3（段階 2 完了）成立を受けて着手し、RFC 1950/1951 準拠の純 TS 実装が runtime に入った。native は差分オラクルへ降格。差分 1,386 回全一致・門番 2884/2881 維持。これで Phase 0〜3 の実装項目はすべて閉じた。その前: **Phase 3（段階 2・pdf-lib 撤去）受入充足（2026-08-18）** — `pdf-writer-mcp` の `src/` から pdf-lib が消え（17 ファイル → 0）、書き手は normativepdf 0.6.1 になった。**writer 0.20.1 として公開済み**。受入 3 条件（撤去 / UC 回帰全緑 / veraPDF レポート同梱）はすべて満たした（handoff §3.33）。Phase 2 は 2026-08-13 に着手・同日受入充足（0.3.1 公開・writer 0.19.0 が第 1 利用者）。Phase 1 も受入充足（自前 inflate のみ ADR-0003 のトリガー待ちで残置）
 >
 > **次に着手するものは [`handoff/`](handoff/) に 1 件 1 枚で置いてある**（別セッションが 1 枚読めば始められる形）:
 > [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
@@ -21,6 +21,7 @@ flowchart LR
     P3 -.-> T2["運用: e-shiwake"]
     P1 -.-> R1["公開: npm 確保・README 英語化"]
     P3 -.-> R2["公開: サイト normativepdf.dev"]
+    P4 -.-> D1["高レベル層: @normativepdf/document<br/>（ADR-0009・別リポジトリ）"]
     style P0 fill:#d4edda
     style P1 fill:#d4edda
     style P2 fill:#d4edda
@@ -233,7 +234,7 @@ flowchart LR
 
 - [x] **読み側: §7.6.4 標準セキュリティハンドラの復号（2026-08-24）** — `src/encrypt/`（MD5 / RC4 / SHA-256/384/512 / AES は純 TS・全分岐に条文/RFC 番号。テストは node:crypto 差分オラクル = ADR-0003 と同じ形。RC4 は OpenSSL 3 が無効化しているので RFC 6229 の公開ベクタ）。鍵導出 = Algorithm 2（R2-4・MD5 50 回）と 2.A/2.B（R6・SHA 三種 + AES-CBC 反復）。ユーザ/オーナー両パスワード認証（Algorithm 6/7・11/12）+ R6 は Perms の「adb」検査（鍵の実効性）と P 整合の記録（Algorithm 13 は should = 記録のみ）。§7.6.2 の例外 4 種を形どおり実装（trailer /ID・Encrypt 辞書・ストリーム内文字列・署名 /Contents は /ByteRange で識別）。xref ストリームは**辞書ごと**素通し — 辞書が trailer を兼ね /ID を持つ（実装後の最初の実測失敗がこれ。2 検体とも該当）。公開鍵ハンドラ §7.6.5・R5・CFM None は名指しで拒否。**空パスワードの実測（ADR-0008「測っていないこと」第 1 項）= 4 検体とも空ユーザパスワードで認証が通った**
 - [x] **読み側: 復号できないときは常に名指しエラー（2026-08-24）** — 暗号文を黙って返す経路を閉じた: decryptor 無しで trailer が /Encrypt を持つ文書の `getObject` は EncryptionError（bootstrap の Encrypt 辞書取得だけが例外）。writeFile / appendUpdate も /Encrypt を見て名指しで拒む（復号済み平文を /Encrypt 付きで書けば宣言と中身が食い違うファイルになる）。**T-3 実測 2 通り = 検査を外すと該当テストだけが落ち、戻すと 27/27**
-- [x] **書き側: TS 32003（AES-GCM）landed（2026-08-24）** — 標準ハンドラの書き込みを実装（`src/encrypt/standard-handler-writer.ts`・`document-encryptor.ts`・`src/serialize/encrypt-writer.ts` の `encryptPdf`）。AES-256-CBC（AESV3・V5/R6）と AES-GCM（AESV4・V6/R7・TS 32003）。鍵導出の書き側 = Algorithm 8/9/10（U/UE・O/OE・Perms 生成）。AES-GCM は純 TS（CTR + GHASH・エンジン非依存維持）。乱数は `globalThis.crypto.getRandomValues` 既定・注入可（決定論テスト用）。**受入 = 二面測定**: ①AESV3 は **qpdf が全体復号**（`--decrypt` で平文回収・`--check` clean）②AESV4 は **node:crypto の aes-256-gcm が各オブジェクトを独立復号**（qpdf は R7/V6 非対応を実測）③両方とも自前読み戻しで元平文に一致・暗号化ファイルに平文漏れ無し。ユニット新規 28 件（GCM 差分 + 往復 + T-3）
+- [x] **書き側: TS 32003（AES-GCM）landed（2026-08-24）** — 標準ハンドラの書き込みを実装（`src/encrypt/standard-handler-writer.ts`・`document-encryptor.ts`・`src/serialize/encrypt-writer.ts` の `encryptPdf`）。AES-256-CBC（AESV3・V5/R6）と AES-GCM（AESV4・V6/R7・TS 32003）。鍵導出の書き側 = Algorithm 8/9/10（U/UE・O/OE・Perms 生成）。AES-GCM は純 TS（CTR + GHASH・エンジン非依存維持）。乱数は `globalThis.crypto.getRandomValues` 既定・注入可（決定論テスト用）。**受入 = 二面測定**: ①AESV3 は **qpdf が全体復号**（`--decrypt` で平文回収・`--check` clean）②AESV4 は **node:crypto の aes-256-gcm が各オブジェクトを独立復号**（qpdf は R7/V6 非対応を実測）③両方とも自前読み戻しで元平文に一致・暗号化ファイルに平文漏れ無し。ユニット新規 28 件（GCM 差分 + 往復 + T-3）。**v0.8.0 として公開（2026-08-24・tag → publish.yml。公開経路の門番を通った初のリリース。公開版検証 = install した 0.8.0 で AESV3/AESV4 往復 OK・qpdf が公開版出力を独立復号）**
 - [ ] 書き側: TS 32004（MAC / 完全性保護）— **defer**（[ADR-0008](adr/0008-phase4-encryption.md) 決定 4）。CMS/ASN.1 + HKDF + digest 範囲の別レイヤで独立検証器が無く（qpdf/veraPDF 未対応）実需要も 0。要求駆動で起こす
 - [x] **受入到達（2026-08-24）: 暗号化 4 検体で parsePdf + 全 in-use/compressed の getObject + getCatalog 成功・Flate 含みストリームが復号後に decode まで通る**（RC4 V2/R3 = XMP 平文・AESV2 ×2・AESV3 = objstm の中身まで）。**門番実測 = parse 2884 → 2886/2907（+2 = 名指しエラーだった 2 検体・pass 検体は全件緑・差分オラクル 1,395 回全一致）／往復 2881 のまま・qpdf 苦情なし・not-measurable 5 = 暗号化 4 + /Prev 打ち切り 1**（暗号化検体の往復は書き側暗号化が入るまで not-measurable が正しい = ADR-0008）。ユニット = 新規 57 件（qpdf 11.9.0 独立生成の凍結フィクスチャ 8 本: RC4 40/128・AESV2・AESV3・パスワード付き・objstm。qpdf は未参照オブジェクトを黙って捨てる — /Note 検体が全フィクスチャから消えていた実測あり、参照を張って再生成）・全体 525/525 緑
 
@@ -250,13 +251,31 @@ flowchart LR
 
 - [x] npm `normativepdf` 確保 = **0.1.0 を静かに公開（2026-08-11）**。告知なし・名前確保 + 依存解決のみ。お披露目は v1.0 + サイト + veraPDF レポートで（PUBLISHING §4）
 - [x] README 英語主・日本語従へ転換（2026-08-11。現在地 = コーパス門番の数字も記載・非公開パス参照を削除）
-- [ ] normativepdf.dev DNS 設定（HTTPS 必須 = GitHub Pages）
+- [ ] normativepdf.dev DNS 設定（HTTPS 必須 = GitHub Pages）。**着火 = サイト第 1 段と同時**（下のサイト構築の項）
 - [x] 初回 npm 公開（2026-08-11・0.1.0。**公開版検証 PASS** = 31 エクスポート一致・実パース OK・/Version 格上げ動作・`npm view` で 0.1.0 確認）
+- [x] **v0.8.0 公開（2026-08-24）** — tag `v0.8.0` push → publish.yml（version=tag 検査 → 2,907 件門番 = corpus/roundtrip survey 差分オラクル ON → Trusted Publisher OIDC で `npm publish`）が**初めて実リリースで通った**。公開版検証 PASS = 77 エクスポート・`encryptPdf`（AESV3/AESV4）→ `parsePdf` 往復・qpdf 11.9.0 が公開版 AESV3 出力を独立復号（`--check` で AESv3 表示・clean）
+- [x] **npm Organization `normativepdf` 確保（2026-08-24）** — `@normativepdf/document` の器（ADR-0009）。コアは unscoped `normativepdf` のまま（改名しない。scoped 初回公開は `--access public` が要る）
 - [x] **リリースごとの veraPDF レポート同梱を開始（2026-08-18）** — `pdf-writer-mcp/docs/CONFORMANCE.md`。
       **lock から生成する**（手書きしない）ので、実装が動いてレポートだけ古い状態にならない。
       `prepublishOnly` が lock との差を検査して publish を止める。判定を出したビルド
       （qpdf 12.4.0 / veraPDF 1.30.0）も一緒に載る —— 規則の数は同じビルドの実行どうしでしか比べられない
-- [ ] サイト構築（マニュアル・チュートリアル・リファレンス・family との関係。雛形 = pdf-family-site。**着手は API 確定後**。「family との関係」の節のみ先行可）
+- [ ] サイト構築 — **2 段構え（ADR-0009 §5 で決裁）**: **第 1 段 = 高レベル層 M1 完了時**（コアへの破壊的変更の弾が尽きた時点 ≒ core v1.0-rc）に**コアのみで建てる**（マニュアル・リファレンス・実測ページ・family との関係）／**第 2 段 = M2 完了でお披露目**（document 含む全量。ライブラリという性質上 family サイトよりボリューム大）。雛形 = pdf-family-site。リファレンスと実測ページは生成にする（実装から乖離した文書を残さない）。「family との関係」の節のみ先行可
+
+## 高レベル層トラック（`@normativepdf/document`）
+
+> **決裁 = [ADR-0009](adr/0009-highlevel-document-package.md)（2026-08-24・Accepted）**: 器 = 別 npm パッケージ
+> `@normativepdf/document`・独立リポジトリ（multi-repo。作業場所は `pdf-agent-stack/lib/document`）。
+> document は**公開済みの core** を通常 dependencies に持つ（コアへ要求が跳ね返ったら core を先にリリースしてから上げる）。
+> 抽出元 = pdf-writer-mcp の services（約 10,300 行・実測済み）で、各 M の完了ごとに writer が消費者になる
+> （Phase 3 = pdf-lib 撤去と同じ「抽出」の型）。受入の詳細表は ADR-0009 §5。
+> **進捗のチェックボックスはここが正典**（document リポジトリ新設後はそちらの ROADMAP に移し、ここは節目だけ写す）。
+
+- [ ] リポジトリ新設（CI / tag 起動 publish.yml は本リポジトリの型を移植。コーパス基盤は持たない — 受入の道具が違う）
+- [ ] **M1**: Document/Page・フォント登録（TTF/OTF・日本語）・drawText（自動改行・整列）・図形・save — 受入 = **「10 行で日本語 1 ページ PDF」がそのまま動く・タグ付きが既定**・qpdf clean・veraPDF 検査可
+- [ ] **M2**: 表・画像・ヘッダフッタ・Markdown → PDF — 受入 = writer の `create_table_pdf` / `create_markdown_pdf` 相当を再現し UC オラクル同等の判定を通る
+- [ ] **M3**: 既存文書の高レベル編集（ページ操作・透かし・しおり・添付）— 受入 = writer 該当ツールの置き換えで UC 回帰全緑
+- [ ] **M4**: AcroForm・適合プロファイル save・暗号化オプション — 受入 = acroform 抽出完了・veraPDF COMPLIANT 維持・`encryptPdf` 統合
+- コア側の需要駆動候補（着火待ち・ADR-0009 §6）: **テキスト抽出プリミティブ**（演算子イテレータ + §9.10.2/9.10.3 ToUnicode 復号 = 文字と位置。独立オラクル = pdftotext / pdfium が立つことは確認済み）。着火 = reader の pdfjs-dist 置き換え起票、または外部需要の実測
 
 ## 試験トラック
 
