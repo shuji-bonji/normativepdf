@@ -31,8 +31,8 @@
     "commit": "49de56cd987929932c9e4fbbbe67d052bf44ef83",
     "license": "CC BY 4.0",
     "specimens": 2907,
-    "baselineParsed": 2884,
+    "baselineParsed": 2886,
     "baselineRoundTrip": 2881,
-    "measuredAt": "2026-08-14"
+    "measuredAt": "2026-08-24"
   }
 }
