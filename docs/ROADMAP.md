@@ -255,6 +255,7 @@ flowchart LR
 - [x] 初回 npm 公開（2026-08-11・0.1.0。**公開版検証 PASS** = 31 エクスポート一致・実パース OK・/Version 格上げ動作・`npm view` で 0.1.0 確認）
 - [x] **v0.8.0 公開（2026-08-24）** — tag `v0.8.0` push → publish.yml（version=tag 検査 → 2,907 件門番 = corpus/roundtrip survey 差分オラクル ON → Trusted Publisher OIDC で `npm publish`）が**初めて実リリースで通った**。公開版検証 PASS = 77 エクスポート・`encryptPdf`（AESV3/AESV4）→ `parsePdf` 往復・qpdf 11.9.0 が公開版 AESV3 出力を独立復号（`--check` で AESv3 表示・clean）
 - [x] **npm Organization `normativepdf` 確保（2026-08-24）** — `@normativepdf/document` の器（ADR-0009）。コアは unscoped `normativepdf` のまま（改名しない。scoped 初回公開は `--access public` が要る）
+- [x] **リファレンス生成パイプライン（2026-08-26）** — typedoc を devDependency に追加（runtime deps 0 は不変）・`npm run docs:reference`（設定 = typedoc.json・出力 docs-reference/ は .gitignore = 生成物をコミットしない・**`treatWarningsAsErrors` で「公開面から参照されるのに未エクスポートの型」を機械検出**）。初回実行が `BuiltType0Font` / `FontNote` の未エクスポート 2 件を掘り当て、export に追加した。実測 = 公開面 145 宣言・TSDoc summary 未記載 32 件（= リファレンス整備の作業リスト）。サイト第 1 段のリファレンスはこの生成物をそのまま使う
 - [x] **リリースごとの veraPDF レポート同梱を開始（2026-08-18）** — `pdf-writer-mcp/docs/CONFORMANCE.md`。
       **lock から生成する**（手書きしない）ので、実装が動いてレポートだけ古い状態にならない。
       `prepublishOnly` が lock との差を検査して publish を止める。判定を出したビルド

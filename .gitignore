@@ -3,3 +3,4 @@ dist/
 corpus/
 *.timestamp-*
 .DS_Store
+docs-reference/

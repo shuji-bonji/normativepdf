@@ -47,10 +47,12 @@
     "check:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "roundtrip": "npm run build && node scripts/roundtrip-corpus.mjs --qpdf",
-    "roundtrip:survey": "npm run build && node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf"
+    "roundtrip:survey": "npm run build && node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf",
+    "docs:reference": "typedoc"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
+    "typedoc": "^0.28.20",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   }

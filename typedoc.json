@@ -1,0 +1,12 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "out": "docs-reference",
+  "name": "normativepdf",
+  "includeVersion": true,
+  "excludeInternal": true,
+  "treatWarningsAsErrors": true,
+  "navigationLinks": {
+    "GitHub": "https://github.com/shuji-bonji/normativepdf"
+  }
+}

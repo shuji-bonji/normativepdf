@@ -97,6 +97,8 @@ export {
   type PredictorParms,
 } from './filter/predictor.js';
 export type {
+  BuiltType0Font,
+  FontNote,
   FontObjectSink,
   FontProgram,
   FontProgramFormat,
