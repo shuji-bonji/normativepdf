@@ -43,12 +43,13 @@
     "corpus:fetch": "node scripts/fetch-corpus.mjs",
     "corpus:parse": "npm run build && node scripts/parse-corpus.mjs",
     "corpus:survey": "npm run build && node scripts/parse-corpus.mjs --survey corpus/veraPDF-corpus",
-    "check": "biome check src tests",
-    "check:fix": "biome check --write src tests",
+    "check": "biome check src tests docs/examples",
+    "check:fix": "biome check --write src tests docs/examples",
     "format": "biome format --write src tests",
     "roundtrip": "npm run build && node scripts/roundtrip-corpus.mjs --qpdf",
     "roundtrip:survey": "npm run build && node scripts/roundtrip-corpus.mjs --survey corpus/veraPDF-corpus --qpdf",
-    "docs:reference": "typedoc"
+    "docs:reference": "typedoc",
+    "docs:measurements": "node scripts/measurements.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
