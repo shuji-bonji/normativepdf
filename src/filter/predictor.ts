@@ -27,6 +27,7 @@ export interface PredictorParms {
   readonly columns: number;
 }
 
+/** Table 10 defaults: Predictor 1 (none), Colors 1, BitsPerComponent 8, Columns 1. */
 export const DEFAULT_PREDICTOR_PARMS: PredictorParms = {
   predictor: 1,
   colors: 1,

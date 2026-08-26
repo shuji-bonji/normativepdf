@@ -49,6 +49,7 @@
 import { ContentStreamBuilder } from '../content/content-stream.js';
 import type { CosDict, CosObject, CosRef } from '../cos/types.js';
 
+/** Raised by the structure-tree builder when a request breaks §14.7 — the tree is refused, not repaired. */
 export class StructTreeError extends Error {
   override readonly name = 'StructTreeError';
 }
@@ -82,6 +83,10 @@ export interface StructObjectSink {
   write(ref: CosRef, object: CosObject): void;
 }
 
+/**
+ * Optional Table 355 entries for a new structure element. `/S` comes from
+ * the `type` argument and `/P` is wired by the builder.
+ */
 export interface StructElementOptions {
   /** Parent element. Absent = a child of the structure tree root. */
   readonly parent?: StructElement;
@@ -186,6 +191,7 @@ export class TaggedStream {
   }
 }
 
+/** What building the tree hands back: the entries the catalog and the pages shall record (§14.7). */
 export interface BuiltStructTree {
   /** For the catalog's `/StructTreeRoot` (R-14.7.2-2). */
   readonly structTreeRoot: CosRef;
@@ -203,6 +209,13 @@ export interface BuiltStructTree {
   readonly structParents: ReadonlyMap<TaggedStream, number>;
 }
 
+/**
+ * Builds a structure tree (§14.7): `element` creates structure elements,
+ * tagged content streams tie them to marked content, and the finished tree
+ * is written through a `StructObjectSink`, which owns object numbering.
+ * A request §14.7 does not admit raises `StructTreeError` when it is made,
+ * not when the tree is written.
+ */
 export class StructTreeBuilder {
   readonly #elements = new Set<StructElement>();
   readonly #roots: StructElement[] = [];

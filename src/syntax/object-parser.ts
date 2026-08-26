@@ -29,6 +29,7 @@ export class ParseError extends Error {
   }
 }
 
+/** Options for `parseObject` / `parseIndirectObject`. */
 export interface ParseObjectOptions {
   /**
    * Resolve an indirect /Length to its integer value (§7.3.10 EXAMPLE 3:

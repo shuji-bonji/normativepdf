@@ -22,6 +22,7 @@ import { ByteCursor } from '../syntax/byte-cursor.js';
 import { ParseError, parseObject } from '../syntax/object-parser.js';
 import { TokenReader } from '../syntax/token-reader.js';
 
+/** An object stream's index, decoded: Table 16 `First`, the (number, offset) pairs, the data. */
 export interface ParsedObjectStream {
   /** Byte offset in the decoded data of the first object (Table 16 First). */
   readonly first: number;

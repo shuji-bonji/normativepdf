@@ -47,6 +47,7 @@ export interface PageTreeReader {
   getCatalog(): Promise<CosObject>;
 }
 
+/** One page as the walk found it (§7.7.3), with the ancestor chain that attribute inheritance reads (Table 31). */
 export interface PageEntry {
   /** Position in the tree, in the order §7.7.3 gives the pages. */
   readonly index: number;
@@ -65,6 +66,7 @@ export interface NodeEntry {
   readonly count: number;
 }
 
+/** What `readPageTree` measured: the pages in §7.7.3 order, the interior nodes, and the walk's anomalies. */
 export interface PageTree {
   readonly pages: readonly PageEntry[];
   readonly nodes: readonly NodeEntry[];
@@ -82,6 +84,7 @@ export interface PageTree {
   readonly reached: boolean;
 }
 
+/** One §7.7.3 requirement the tree does not meet, named by clause. */
 export interface PageTreeViolation {
   /** The requirement, so an error can name it rather than describe it. */
   readonly clause: string;

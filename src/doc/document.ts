@@ -66,6 +66,7 @@ const CREATED_CATALOG = 1;
 /** Object number the root page-tree node takes in a document made by `create`. */
 const CREATED_PAGES = 2;
 
+/** Options for creating a document from nothing (an empty catalog and page tree). */
 export interface CreateOptions {
   /**
    * Header version to write, `1.n` or `2.n` (§7.5.2). Defaults to `"1.7"`
@@ -75,6 +76,12 @@ export interface CreateOptions {
   readonly version?: string;
 }
 
+/**
+ * The mutable layer over a parsed document — or over nothing, for a
+ * document made by `create`. Changes are staged per object number; the
+ * parsed `base` stays immutable, and the staged state is what the
+ * serializers (full rewrite or incremental update, §7.5.6) read.
+ */
 export class PdfDocumentEditor {
   /** The file as read. Immutable, and shared with anything else reading it. */
   readonly base: PdfDocument;

@@ -41,6 +41,10 @@
 
 import type { CosDict, CosObject, CosRef, CosStream } from '../cos/types.js';
 
+/**
+ * Raised by `sniffFontProgram` / `buildType0Font` when font program bytes
+ * do not support what is being claimed of them (§9.9).
+ */
 export class FontProgramError extends Error {
   override readonly name = 'FontProgramError';
 }
@@ -48,6 +52,7 @@ export class FontProgramError extends Error {
 /** What the bytes are, as measured — never as claimed. */
 export type FontProgramFormat = 'truetype' | 'opentype-cff' | 'bare-cff';
 
+/** A font program as `sniffFontProgram` measured it: format, sfnt tables, glyph count, bytes. */
 export interface FontProgram {
   readonly format: FontProgramFormat;
   /** sfnt table tags present, in directory order. Empty for a bare CFF. */
@@ -196,6 +201,7 @@ export interface FontNote {
   readonly message: string;
 }
 
+/** `buildType0Font`'s result: the font reference, plus what was observed while building. */
 export interface BuiltType0Font {
   /** The reference to put in `/Resources /Font`. */
   readonly font: CosRef;
@@ -208,6 +214,12 @@ export interface FontObjectSink {
   allocate(object: CosObject): CosRef;
 }
 
+/**
+ * Input to `buildType0Font`: the measured program plus the dictionary facts
+ * only the caller knows — name, descriptor entries, widths, ToUnicode
+ * (§9.7, §9.8). Subsetting itself happened before this module (DESIGN §4.2);
+ * what arrives here is its result.
+ */
 export interface Type0FontSpec {
   /** The embedded program, as measured by `sniffFontProgram`. */
   readonly program: FontProgram;

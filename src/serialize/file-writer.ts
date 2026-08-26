@@ -38,6 +38,7 @@ export interface WritableObject {
   readonly object: CosObject;
 }
 
+/** Options for `writeFile`. */
 export interface WriteFileOptions {
   /**
    * Header version to write (§7.5.2: `%PDF-1.n` / `%PDF-2.n`). Defaults to the

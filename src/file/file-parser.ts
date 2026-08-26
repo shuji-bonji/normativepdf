@@ -77,6 +77,7 @@ export interface XrefUnknown {
   readonly rawType: number;
 }
 
+/** One cross-reference entry, discriminated by `type` (§7.5.4; §7.5.8.3 Table 18). */
 export type XrefEntry = XrefInUse | XrefFree | XrefCompressed | XrefUnknown;
 
 /**
@@ -100,7 +101,6 @@ export interface XrefSection {
   readonly selfObjectNumber: number | undefined;
 }
 
-/** A walked cross-reference chain, newest section first (§7.5.4/§7.5.6). */
 /**
  * Why the walk up the `/Prev` chain stopped.
  *
@@ -124,6 +124,7 @@ export type XrefChainStop =
   /** `/Prev` was not a direct integer (§7.5.5 Table 15). */
   | { readonly kind: 'malformed'; readonly offset: number };
 
+/** A walked cross-reference chain, newest section first (§7.5.4/§7.5.6). */
 export interface XrefChain {
   /** Byte index of the PERCENT SIGN of %PDF- — the offset origin (§7.5.2). */
   readonly origin: number;

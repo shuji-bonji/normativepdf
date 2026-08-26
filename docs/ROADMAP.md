@@ -256,6 +256,9 @@ flowchart LR
 - [x] **v0.8.0 公開（2026-08-24）** — tag `v0.8.0` push → publish.yml（version=tag 検査 → 2,907 件門番 = corpus/roundtrip survey 差分オラクル ON → Trusted Publisher OIDC で `npm publish`）が**初めて実リリースで通った**。公開版検証 PASS = 77 エクスポート・`encryptPdf`（AESV3/AESV4）→ `parsePdf` 往復・qpdf 11.9.0 が公開版 AESV3 出力を独立復号（`--check` で AESv3 表示・clean）
 - [x] **npm Organization `normativepdf` 確保（2026-08-24）** — `@normativepdf/document` の器（ADR-0009）。コアは unscoped `normativepdf` のまま（改名しない。scoped 初回公開は `--access public` が要る）
 - [x] **リファレンス生成パイプライン（2026-08-26）** — typedoc を devDependency に追加（runtime deps 0 は不変）・`npm run docs:reference`（設定 = typedoc.json・出力 docs-reference/ は .gitignore = 生成物をコミットしない・**`treatWarningsAsErrors` で「公開面から参照されるのに未エクスポートの型」を機械検出**）。初回実行が `BuiltType0Font` / `FontNote` の未エクスポート 2 件を掘り当て、export に追加した。実測 = 公開面 145 宣言・TSDoc summary 未記載 32 件（= リファレンス整備の作業リスト）。サイト第 1 段のリファレンスはこの生成物をそのまま使う
+- [x] **TSDoc 全記載（2026-08-26）** — 未記載 32 件を実装に即して記載し **summary 145/145**。副次修正 1 件 = `XrefChain` の doc コメントが `XrefChainStop` の宣言に挟まれて宙に浮いていた（TypeDoc は直前のコメントしか拾わない）。以後の欠落は docs:reference の JSON で数えられる
+- [x] **実測ページの生成（2026-08-26）** — `npm run docs:measurements`（scripts/measurements.mjs）。**数字は corpus.lock.json だけから読む**（スクリプトは数字を 1 つも持たない = lock と食い違いようがない）。「この数字が主張しないこと」の節も生成に含む
+- [x] **実行されるサンプル（2026-08-26）** — `docs/examples/` 4 本（最小 PDF の手組み / 読み戻しと content stream 復号 / 増分更新 / 暗号化）。**サンプルは表示用の文書ではなくテストが実行するコード**（tests/examples.test.ts・vitest alias で `import from 'normativepdf'` の消費者形で書く）— 動かなくなれば CI が落ちる。qpdf で 3 出力とも独立検査済み（暗号化はパスワード認証まで）。サイトのチュートリアルはこのソースを埋め込む
 - [x] **リリースごとの veraPDF レポート同梱を開始（2026-08-18）** — `pdf-writer-mcp/docs/CONFORMANCE.md`。
       **lock から生成する**（手書きしない）ので、実装が動いてレポートだけ古い状態にならない。
       `prepublishOnly` が lock との差を検査して publish を止める。判定を出したビルド

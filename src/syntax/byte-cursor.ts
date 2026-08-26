@@ -11,6 +11,11 @@
 
 import { EOF, isNewline, isWhitespace } from './byte-classes.js';
 
+/**
+ * Position-tracked cursor over the file's raw bytes — the layer the lexer
+ * (`nextToken`) and the raw stream reader share, so token reading and byte
+ * reading stay in step (§7.2).
+ */
 export class ByteCursor {
   readonly #bytes: Uint8Array;
   #pos: number;

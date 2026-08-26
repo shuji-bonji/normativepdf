@@ -32,6 +32,7 @@ import { FilterError } from './error.js';
 /** What a caller may ask for. `null` = write the bytes as they are. */
 export type EncodeFilter = null | string;
 
+/** `encodeStream`'s result: the bytes plus the `/Filter` value to record. */
 export interface EncodedStream {
   readonly bytes: Uint8Array;
   /**

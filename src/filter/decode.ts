@@ -14,6 +14,7 @@ import { FilterError } from './error.js';
 import { inflate } from './inflate.js';
 import { applyPredictor, DEFAULT_PREDICTOR_PARMS, type PredictorParms } from './predictor.js';
 
+/** Options for `decodeStream`. */
 export interface DecodeOptions {
   /**
    * Resolve indirect values in Filter / DecodeParms. Cross-reference

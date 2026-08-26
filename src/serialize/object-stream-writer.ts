@@ -35,6 +35,7 @@ export interface CompressedPlacement {
   readonly indexInStream: number;
 }
 
+/** `buildObjectStream`'s result: the `/ObjStm` object and where each compressed object landed. */
 export interface BuiltObjectStream {
   /** The `/Type /ObjStm` stream, ready to be written as an indirect object. */
   readonly stream: CosObject;

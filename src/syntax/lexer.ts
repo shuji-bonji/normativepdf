@@ -37,6 +37,10 @@ export class LexError extends Error {
   }
 }
 
+/**
+ * One lexical token of COS syntax (§7.2/§7.3), carrying the byte offset it
+ * began at. Each alternative's comment names the clause that defines it.
+ */
 export type Token =
   /** §7.3.3 integer (R-7.3.3-2). */
   | { readonly kind: 'integer'; readonly value: number; readonly offset: number }

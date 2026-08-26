@@ -179,10 +179,18 @@ const REFUSED: Readonly<Record<string, string>> = {
   d1: 'Type 3 glyph operator (Table 111); it belongs in a glyph description, not here',
 };
 
+/** Raised when an operator sequence is one the clauses do not admit (§8.2, Annex A). */
 export class ContentStreamError extends Error {
   override readonly name = 'ContentStreamError';
 }
 
+/**
+ * Writes a content stream operator by operator, refusing what the clauses
+ * refuse: operators Annex A does not define, operators outside their
+ * allowed context (Figure 9), unbalanced BT/ET, q/Q and marked-content
+ * pairs. Operand *values* are the caller's responsibility; the sequence
+ * is this builder's.
+ */
 export class ContentStreamBuilder {
   readonly #out = new ByteWriter();
   #context: ContentContext = 'page';

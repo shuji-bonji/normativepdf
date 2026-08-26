@@ -93,6 +93,7 @@ function subsections(numbers: readonly number[]): { start: number; count: number
   return runs;
 }
 
+/** `buildXrefStream`'s result. */
 export interface BuiltXrefStream {
   /** The `/Type /XRef` stream, ready to be written as an indirect object. */
   readonly stream: CosObject;

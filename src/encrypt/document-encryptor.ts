@@ -22,6 +22,11 @@ import type { CosDict, CosObject, CosStream } from '../cos/types.js';
 import { dictGet } from '../cos/types.js';
 import { encryptBytes, type RandomBytes, type WriteMethod } from './standard-handler-writer.js';
 
+/**
+ * The write-side §7.6.2 transform: encrypts strings and stream bytes with
+ * the file key, leaving the exempt objects alone (the module comment lists
+ * the exemptions). The inverse of `DocumentDecryptor`.
+ */
 export class DocumentEncryptor {
   readonly #method: WriteMethod;
   readonly #fileKey: Uint8Array;

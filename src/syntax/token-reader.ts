@@ -15,6 +15,12 @@
 import type { ByteCursor } from './byte-cursor.js';
 import { nextToken, type Token } from './lexer.js';
 
+/**
+ * Pull-based token reader with pushback over a `ByteCursor`. With the
+ * lookahead buffer empty the cursor sits immediately past the last token,
+ * so stream bytes (§7.3.8) can be read raw from the same cursor without
+ * token-level buffering in between.
+ */
 export class TokenReader {
   readonly #cur: ByteCursor;
   readonly #buffer: Token[] = [];

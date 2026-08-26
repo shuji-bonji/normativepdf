@@ -38,6 +38,11 @@
 
 import type { CosDict, CosObject, CosRef } from '../cos/types.js';
 
+/**
+ * Raised by `declareConformance` when a requested level has unmet
+ * requirements: a declaration the objects contradict shall not be written.
+ * Carries the level and the unmet list, each entry naming its requirement.
+ */
 export class DeclarationRefused extends Error {
   override readonly name = 'DeclarationRefused';
   constructor(

@@ -51,6 +51,7 @@ export interface DeletedObject {
   readonly generationNumber: number;
 }
 
+/** Input to `appendUpdate`: the original file plus what the update changes. */
 export interface AppendUpdateInput {
   /** The file being updated, exactly as it was read. */
   readonly original: Uint8Array;
@@ -144,6 +145,7 @@ function buildTrailer(previous: CosDict, previousXrefOffset: number, size: numbe
   return { kind: 'dict', entries };
 }
 
+/** What `appendUpdate` returns. */
 export interface AppendUpdateResult {
   /** The complete updated file: the original bytes, then the update. */
   readonly bytes: Uint8Array;

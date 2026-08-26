@@ -129,8 +129,9 @@ export type CosObject =
 /** Shared singleton for the null object (R-7.3.9-1). */
 export const COS_NULL: CosNull = { kind: 'null' };
 
-/** True boolean singletons — no state, safe to share. */
+/** Boolean singleton `true` (§7.3.2) — no state, safe to share. */
 export const COS_TRUE: CosBoolean = { kind: 'boolean', value: true };
+/** Boolean singleton `false` (§7.3.2) — no state, safe to share. */
 export const COS_FALSE: CosBoolean = { kind: 'boolean', value: false };
 
 /**
