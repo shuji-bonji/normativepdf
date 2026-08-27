@@ -3,6 +3,89 @@
 All notable changes to `normativepdf` are recorded here. The corpus pass
 rate is the measurement; `corpus.lock.json` is its source of truth.
 
+## [0.9.0] — 2026-08-27
+
+The §7.9 text-string layer: decoding a string object into readable text, and
+reading and writing dates. The requirement came from consumers — four of them
+were implementing the same thing four different ways.
+
+### Added — text strings (§7.9.2)
+
+- `decodeTextString(bytes)` reads a text string in any of the three encodings
+  R-7.9.2.2.1-2 allows, told apart by what the bytes begin with: `FE FF` for
+  UTF-16BE (R-7.9.2.2.1-3), `EF BB BF` for UTF-8 (R-7.9.2.2.1-4, PDF 2.0), and
+  PDFDocEncoding otherwise. Supplementary characters survive
+  (R-7.9.2.2.1-5).
+- `encodeTextString(text)` writes PDFDocEncoding when every character has a
+  code point in Table D.3, and UTF-16BE with a byte order mark otherwise. The
+  caller does not choose: choosing leaves a path where a string is written in
+  an encoding that cannot hold it. A string whose PDFDocEncoded bytes would
+  begin `FE FF` or `EF BB BF` also goes to UTF-16BE, because it would be read
+  back as a different encoding (NOTE 3 and NOTE 4 of §7.9.2.2.1).
+- `stripLanguageEscape(text)` removes language escape sequences (§7.9.2.2.2).
+  The clause says they may appear *anywhere* in a Unicode text string, so this
+  is not limited to the start. It is not applied to PDFDocEncoded strings:
+  PDFDocEncoding has no ESCAPE — byte 0x1B is U+02D9 DOT ABOVE — so the
+  sequence cannot be written in one, and removing it there would delete text.
+- `pdfDocDecode` / `pdfDocEncode` / `UNDEFINED_CODES` / `TABLE_D3_DEFECTS`
+  (§7.9.2.3, Annex D.3). The table is transcribed from Table D.3, not from
+  another library: 232 defined code points and 24 undefined ones.
+
+### Added — dates (§7.9.4)
+
+- `parsePdfDate(value)` returns the fields (`PdfDate`) or `null`. Every rule
+  the clause states is enforced: the `D:` prefix and the year are required and
+  every later field needs its predecessors (R-7.9.4-12); the APOSTROPHE needs
+  the hour offset (R-7.9.4-14) and the minute offset needs the APOSTROPHE
+  (R-7.9.4-15); MM and DD default to 01 and the rest to zero (R-7.9.4-16); no
+  UT information means GMT (R-7.9.4-17). The terminating APOSTROPHE of PDF 1.7
+  and earlier is accepted (NOTE 2 of §7.9.4).
+- `formatPdfDate(when)` writes the ISO 32000-2 form in UT, **without** a
+  terminating APOSTROPHE. That character belongs to PDF 1.7 and earlier; NOTE 2
+  recommends accepting it on input, not writing it.
+
+### Measured
+
+- **Differential oracle against pdf-lib** (`scripts/text-oracle.mjs`; pdf-lib is
+  not a dependency — install it for the run). Over the corpus, 2,916 of 2,917
+  files read: **2,606 of 2,612 text strings are byte-identical**. All six
+  differences are the UTF-8 byte order mark, which pdf-lib 1.x does not handle;
+  the clause is right, so the difference is recorded as an improvement.
+  **938 of 941 dates are read alike** (against the regular expression
+  `@shuji-bonji/pdf-constraints` uses today), and three are read by neither —
+  two of those are dates behind a UTF-8 byte order mark, which this library
+  reads once the string has been decoded (938 → 940), and one is written in
+  ISO 8601, which is not the form §7.9.4 defines.
+- **T-3, seven ways, all of them turn tests red**: removing the UTF-16BE mark
+  check (10 tests), removing the UTF-8 mark check (4), not removing language
+  escapes (7), folding a supplementary character into one code unit (2), not
+  avoiding a PDFDocEncoding that collides with a mark (1), making the date
+  APOSTROPHE optional (1), and allowing undefined code points to be written (1).
+- Round trip over four axes plus all 232 defined bytes. The language-escape axis
+  is deliberately not the identity: decoding removes the sequence.
+
+### Note — Table D.3 contradicts itself in three rows
+
+Recorded in `TABLE_D3_DEFECTS`. All three are rows the Notes column marks `U`
+(undefined in PDFDocEncoding), so no conforming string reaches them:
+
+- 0x16 — the Unicode column says U+0017 while the name says "(SYNCRONOUS
+  IDLE)", which is U+0016; 0x16 and 0x17 are given the same code point.
+  pdf-lib 1.x has the same defect, transcribed from the same table.
+- 0x04 — named "(END OF TEXT)", which is 0x03.
+- 0x38 — named "DIGIT EIGJT".
+
+The Unicode column is followed, since that is the column a decoder reads.
+Separately, the glyph names in NOTE 4 of §7.9.2.2.1 do not match the code
+points of Table D.3: the first of "dieresis, guillemotright, questiondown" is
+U+00A8, which is byte 0xA8, not the byte 0xEF the note is about.
+
+### Gates
+
+Unchanged: 2886/2907 parsed, 2881 round-tripped, `qpdf --check` 2881/2881
+introducing nothing new, inflate differential oracle byte-identical over 1,395
+and 1,386 comparisons.
+
 ## [0.8.0] — 2026-08-24
 
 Phase 4 (encryption, ADR-0008) — read and write sides of the standard

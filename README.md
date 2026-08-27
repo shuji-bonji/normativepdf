@@ -33,6 +33,7 @@ the result that clause violations can be *identified* but not *fixed*
 | Round-trip (read → write → read), all three output forms | **2881/2881** with an equal object graph — classic table, cross-reference stream, and object streams |
 | `qpdf --check`, source vs rewrite | **2881/2881 introduce no complaint the source did not already have**, in all three forms |
 | Encryption, write side (`encryptPdf`) | **AES-256-CBC (AESV3) and AES-GCM (AESV4, ISO/TS 32003)** — an AESV3 document is decrypted whole by qpdf (independent); an AESV4 document is decrypted per object by node:crypto (independent AES-GCM), since no PDF tool in reach reads AES-GCM |
+| Text strings (§7.9.2) and dates (§7.9.4), against `pdf-lib` | **2,606/2,612 identical** across the corpus. All six differences are the UTF-8 byte order mark (R-7.9.2.2.1-4), which pdf-lib 1.x does not handle — the clause is right, so the difference is an improvement. Dates: **938/941 read alike**; two of the three neither reads are dates behind that same mark, which this library reads once the string has been decoded (938 → 940) |
 | Incremental update on a signed specimen | **Both signatures stay VALID** (CAdES + document timestamp), whichever cross-reference form is appended |
 
 The corpus is pinned by commit ([`corpus.lock.json`](corpus.lock.json)) so that a
