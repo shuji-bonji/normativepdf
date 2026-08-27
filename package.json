@@ -36,6 +36,7 @@
     "README.ja.md"
   ],
   "scripts": {
+    "check:engines": "node scripts/check-engines.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run typecheck && npm test && npm run check && npm run build && node scripts/parse-corpus.mjs && node scripts/roundtrip-corpus.mjs",
     "typecheck": "tsc --noEmit",
@@ -52,7 +53,7 @@
     "docs:measurements": "node scripts/measurements.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.4",
+    "@biomejs/biome": "2.5.4",
     "typedoc": "^0.28.20",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
