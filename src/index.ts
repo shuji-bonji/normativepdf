@@ -154,3 +154,16 @@ export { isTokenBoundary, LexError, nextToken } from './syntax/lexer.js';
 export type { IndirectObject, ParseObjectOptions } from './syntax/object-parser.js';
 export { ParseError, parseIndirectObject, parseObject } from './syntax/object-parser.js';
 export { TokenReader } from './syntax/token-reader.js';
+export type { PdfDate } from './text/date.js';
+export { formatPdfDate, parsePdfDate } from './text/date.js';
+export {
+  pdfDocDecode,
+  pdfDocEncode,
+  TABLE_D3_DEFECTS,
+  UNDEFINED_CODES,
+} from './text/pdfdoc-encoding.js';
+export {
+  decodeTextString,
+  encodeTextString,
+  stripLanguageEscape,
+} from './text/text-string.js';
