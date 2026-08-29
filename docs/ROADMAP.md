@@ -9,6 +9,8 @@
 > [増分更新後の PDF/A 測定](handoff/pdfa-after-incremental-update.md) ／
 > [自前 inflate（着手条件は未成立）](handoff/own-inflate.md)。
 > [Phase 3 = pdf-lib 撤去](handoff/phase3-pdflib-removal.md) は**完了した作業の記録**として残す。
+> **読み側の回復方針は `@normativepdf/recover` として切り出す**（[ADR-0010](adr/0010-recover-package.md)・2026-08-29）——
+> コアが「受け取らない」と言った先を消費者が 3 通りに書くのを止める。1 枚 = [`mcp/pdf-verify-mcp/docs/handoff/recover-extraction.md`](../../../mcp/pdf-verify-mcp/docs/handoff/recover-extraction.md)。
 > 消費者側の撤去は各リポジトリに 1 枚ずつある: verify = [`mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`](../../../mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md)（完了）／ reader = [`mcp/pdf-reader-mcp/docs/handoff/pdflib-removal.md`](../../../mcp/pdf-reader-mcp/docs/handoff/pdflib-removal.md)（**未着手・次はこれ**）
 
 ```mermaid
