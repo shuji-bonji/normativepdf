@@ -3,7 +3,7 @@
 All notable changes to `normativepdf` are recorded here. The corpus pass
 rate is the measurement; `corpus.lock.json` is its source of truth.
 
-## [Unreleased]
+## [0.9.1] — 2026-11-03
 
 ### Fixed
 
