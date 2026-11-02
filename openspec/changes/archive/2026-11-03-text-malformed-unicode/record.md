@@ -17,6 +17,8 @@ PDF family の OpenSpec + spec-ids 導入（pdf-agent-stack `docs/specs/31`）�
 | テスト | `npm test` 603 → 607 件。受入テスト 4 件のうち、孤立したサロゲートの 2 件が変更前に落ちた（落ちた理由は出力の違いで、入口の無さではない）。余った 1 バイトと壊れた UTF-8 の 2 件は、今の振る舞いを固定するので変更前も通った。CI の check ジョブの一覧（check:engines・typecheck・test・check）は終了コード 0 |
 | 公開 API | 変更前後の `dist/index.d.ts` が同一 |
 | コーパスの A/B | veraPDF-corpus（ロックの commit `49de56cd`、2,907 件）と pdf20examples（7 件）。2,899 件を読めた（15 件は 0.9.0 の `parsePdf` が例外を投げる、前から同じ）。文字列オブジェクト 36,834 件（UTF-16BE 272 件・UTF-8 16 件）で、変更前後の `decodeTextString` の答えの差は 0 件。計器が差を拾えることは、孤立したサロゲートを含む文字列を通して確かめた（変更前 `"\ud83dA"`・変更後 `"�A"` を差として出す） |
+| 承認と archive | 初版起こしは PR #2（`approved: 2026-11-02`）でマージ。実装 PR #4 は main（`acd1101`）に rebase し、proposal.md に `approved: 2026-11-03`・`pr: 4` を書いて push。エージェントが PR #4 の head を取り込み、渡した commit からの差が承認欄 2 か所だけであることを確かめてから `openspec archive text-malformed-unicode --yes`（+1）。text は既存の capability なので、正本の front matter（`pr: 2`）はそのまま残った |
+| 寄り道 | 初版起こしの PR #2 の CI で、corpus のジョブ（objstm の往復）が落ちた。原因は ubuntu-latest が Ubuntu 26 に移って qpdf 12 になり、オブジェクトストリームの中のオブジェクトについて警告の行の形を変えたこと。往復の門番が同じ警告を「書き直しで増えた」と数えていた。PR #3（`8628b74`）で比べ方を直した。最初の直し方（置き場所の前置きだけを外す）は実際の行を見ずに書いて半分しか合っておらず、お手元の qpdf 12.4.2 の出力で直し直した |
 | 維持の手間 | 仕様だけを変えた変更: 0 件 |
 
 ## 分かったこと

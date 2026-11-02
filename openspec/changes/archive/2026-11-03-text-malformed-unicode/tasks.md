@@ -20,6 +20,6 @@
 
 ## 5. archive（承認の後）
 
-- [ ] 5.1 proposal.md の `approved`・`pr` が埋まっていることを確かめる
-- [ ] 5.2 `openspec archive text-malformed-unicode --yes`（text は既存の capability なので、front matter の書き足しは要らない）
-- [ ] 5.3 `npx openspec validate --all`・`npx spec-ids check`・`npx spec-ids pr-scope` を通して commit
+- [x] 5.1 proposal.md の `approved`・`pr` が埋まっていることを確かめる
+- [x] 5.2 `openspec archive text-malformed-unicode --yes`（text は既存の capability なので、front matter の書き足しは要らない）
+- [x] 5.3 `npx openspec validate --all`・`npx spec-ids check`・`npx spec-ids pr-scope` を通して commit
