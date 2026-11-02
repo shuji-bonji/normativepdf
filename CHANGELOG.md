@@ -3,6 +3,24 @@
 All notable changes to `normativepdf` are recorded here. The corpus pass
 rate is the measurement; `corpus.lock.json` is its source of truth.
 
+## [Unreleased]
+
+### Fixed
+
+- **`decodeTextString` reads an unpaired UTF-16 surrogate as U+FFFD** (`SPEC-NORMATIVEPDF-TEXT-012`,
+  OpenSpec change `text-malformed-unicode`). §7.9.2.2.1 does not say how to read ill-formed
+  UTF-16BE or UTF-8; 0.9.0 answered in three ways — an odd trailing byte became U+FFFD, bytes
+  the UTF-8 decoder could not read became U+FFFD, but a high surrogate with no low surrogate
+  after it (or a low one with no high one before it) was returned as is. JavaScript strings can
+  hold such a code unit, so the caller received a string that changed when it was next encoded
+  (`TextEncoder` turns it into U+FFFD) — what a reader returned and what a screen showed were
+  not the same text. Each unpaired surrogate now reads as U+FFFD, one code unit at a time;
+  a surrogate pair still reads as one character. None of the three cases had a test; all three
+  now do. Across the veraPDF-corpus and pdf20examples (2,899 files parsed, 36,834 string
+  objects, 272 of them UTF-16BE and 16 UTF-8), `decodeTextString` returns the same text before
+  and after the change for every string — no specimen carries an unpaired surrogate. The public
+  API is unchanged. Writing (`encodeTextString` given a lone surrogate) is not covered.
+
 ## [0.9.0] — 2026-08-27
 
 The §7.9 text-string layer: decoding a string object into readable text, and

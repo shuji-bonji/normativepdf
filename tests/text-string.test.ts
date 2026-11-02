@@ -313,3 +313,29 @@ describe('R-7.9.4 — writing a date', () => {
     expect(() => formatPdfDate(new Date(Date.UTC(12026, 0, 1)))).toThrow(RangeError);
   });
 });
+
+describe('SPEC-NORMATIVEPDF-TEXT-012 形の壊れた UTF-16BE と UTF-8 は、壊れた箇所を U+FFFD にして読む', () => {
+  /** 孤立したサロゲート（D800–DFFF の符号単位が単独で）残っていないこと */
+  const hasLoneSurrogate = (text: string): boolean =>
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(text);
+
+  it('SPEC-NORMATIVEPDF-TEXT-012 UTF-16BE の最後に 1 バイト余る', () => {
+    expect(decodeTextString(bytes(0xfe, 0xff, 0x00, 0x41, 0x00))).toBe('A�');
+  });
+
+  it('SPEC-NORMATIVEPDF-TEXT-012 UTF-16BE の対になっていない上位サロゲート', () => {
+    const decoded = decodeTextString(bytes(0xfe, 0xff, 0xd8, 0x3d, 0x00, 0x41));
+    expect(decoded).toBe('�A');
+    expect(hasLoneSurrogate(decoded)).toBe(false);
+  });
+
+  it('SPEC-NORMATIVEPDF-TEXT-012 UTF-16BE の対になっていない下位サロゲート', () => {
+    const decoded = decodeTextString(bytes(0xfe, 0xff, 0x00, 0x41, 0xde, 0x00));
+    expect(decoded).toBe('A�');
+    expect(hasLoneSurrogate(decoded)).toBe(false);
+  });
+
+  it('SPEC-NORMATIVEPDF-TEXT-012 UTF-8 として読めないバイト', () => {
+    expect(decodeTextString(bytes(0xef, 0xbb, 0xbf, 0x41, 0xff, 0x42))).toBe('A�B');
+  });
+});

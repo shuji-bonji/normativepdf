@@ -19,6 +19,8 @@ import { pdfDocDecode, pdfDocEncode } from './pdfdoc-encoding.js';
 
 /** U+FFFD REPLACEMENT CHARACTER. */
 const REPLACEMENT_CHARACTER = '�';
+/** U+FFFD as a UTF-16 code unit. */
+const REPLACEMENT_CODE_UNIT = 0xfffd;
 
 /** R-7.9.2.2.1-3 — the two bytes that mark UTF-16BE. */
 const UTF16BE_BOM: readonly [number, number] = [0xfe, 0xff];
@@ -62,6 +64,26 @@ function decodeUtf16Be(bytes: Uint8Array): string {
   for (let i = 0; i + 1 < bytes.length; i += 2) {
     units.push(((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0));
   }
+  // A surrogate that is not half of a pair is ill-formed UTF-16 (the Unicode
+  // Standard, which R-7.9.2.2.1-2 defers to). JavaScript strings can hold one, so
+  // leaving it in hands the caller a string that changes when it is next encoded
+  // (TextEncoder turns it into U+FFFD). Replace it here, one code unit at a time,
+  // so the damage is visible in the string the caller receives
+  // (SPEC-NORMATIVEPDF-TEXT-012). A high surrogate followed by a low one is a
+  // supplementary character and is kept (SPEC-NORMATIVEPDF-TEXT-004).
+  for (let i = 0; i < units.length; i += 1) {
+    const unit = units[i] ?? 0;
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = units[i + 1];
+      if (next !== undefined && next >= 0xdc00 && next <= 0xdfff) {
+        i += 1;
+        continue;
+      }
+      units[i] = REPLACEMENT_CODE_UNIT;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      units[i] = REPLACEMENT_CODE_UNIT;
+    }
+  }
   let out = '';
   // Chunked so a long string does not exhaust the argument stack.
   for (let i = 0; i < units.length; i += 4096) {
@@ -88,6 +110,12 @@ function startsWith(bytes: Uint8Array, prefix: readonly number[]): boolean {
  * The caller decides *whether* a given string object is a text string — that is
  * fixed by the dictionary key it appears under, not by the bytes (R-7.9.2.1-1).
  * This function only decodes one that is.
+ *
+ * Ill-formed UTF-16BE or UTF-8 is not dropped: each damaged place reads as
+ * U+FFFD — an odd trailing byte, a surrogate that is not half of a pair, and a
+ * byte sequence the WHATWG UTF-8 decoder cannot read. §7.9.2.2.1 does not say
+ * how to read such bytes; this is the library's answer
+ * (SPEC-NORMATIVEPDF-TEXT-012).
  */
 export function decodeTextString(bytes: Uint8Array): string {
   if (startsWith(bytes, UTF16BE_BOM)) {

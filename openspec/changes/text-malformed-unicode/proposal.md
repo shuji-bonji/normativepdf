@@ -1,6 +1,6 @@
 ---
-approved:
-pr:
+approved: 2026-11-03
+pr: 4
 implementation: required
 targets: [text]
 ---
