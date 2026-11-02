@@ -304,7 +304,20 @@ function qpdfVerdict(bytes, scratch, name) {
     // turned the message into unreadable noise, since `normalize` collapses
     // every path segment that looks like a name.
     .map((line) => normalize(line.trim().split(file).join('')))
-    .map((line) => line.replace(/^(ERROR|WARNING):\s*:?\s*/, '$1: '));
+    // 🔴 What follows the file name depends on where the object lives, not on
+    // the complaint. qpdf 12 writes `<file>, object N N at offset N:` for an
+    // indirect object, but `<file> object stream N, object N N at offset N:`
+    // for one inside an object stream (§7.5.7) — a different separator after
+    // the file name, and a prefix. A rewrite with --mode objstm moves objects
+    // into object streams, so the same complaint about the same object read as
+    // new: PDF_UA-2 8.10.2.3-t01-fail-a.pdf carries a widget annotation that is
+    // not reachable from /AcroForm (the defect the specimen exists for), qpdf
+    // 12 reports it for the source and for both rewrites, and only the objstm
+    // gate failed. Strip the separator (`:` or `,`) and the object-stream
+    // prefix on both sides; the numbers are already collapsed, so neither
+    // identified anything.
+    .map((line) => line.replace(/^(ERROR|WARNING):\s*[:,]?\s*/, '$1: '))
+    .map((line) => line.replace(/^(ERROR|WARNING): object stream N, /, '$1: '));
   return new Set(lines);
 }
 
