@@ -1,5 +1,7 @@
 # CLAUDE.md — normativepdf
 
+> 仕様の正本は `openspec/specs/`（OpenSpec）。仕様 ID・PR の種類・承認の記録の規則は [AGENTS.md](./AGENTS.md)。
+
 条文駆動の PDF ライブラリ（純 TypeScript・構造層）。すべての挙動を ISO の条項に紐づけ、紐づけられないものは主張しない。
 現況: **設計確定済み（2026-08-08）・実装は段階 0（COS オブジェクトモデル + パーサ）から。**
 
